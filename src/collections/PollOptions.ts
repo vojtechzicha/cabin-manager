@@ -1,6 +1,11 @@
 import type { CollectionConfig } from "payload";
 
-import { pollOptionsAccess } from "@/access";
+import { pollOptionsAccess, serviceOwnedField } from "@/access";
+import { rejectIfArchived, rejectIfPollClosed, rejectPollOptionDeleteWhenLocked } from "./guards";
+
+// Moderation/ownership fields are service-owned (promote/hide go through the
+// poll service); the trip/poll/kind binding is immutable after creation.
+const locked = { access: { update: serviceOwnedField } } as const;
 
 /**
  * PollOption — a candidate the group votes on (T-301, §8.2). For a date poll
@@ -14,13 +19,18 @@ export const PollOptions: CollectionConfig = {
   slug: "poll-options",
   admin: { useAsTitle: "label", defaultColumns: ["label", "kind", "trip", "hidden"] },
   access: pollOptionsAccess,
+  hooks: {
+    beforeChange: [rejectIfArchived, rejectIfPollClosed],
+    beforeDelete: [rejectPollOptionDeleteWhenLocked],
+  },
   fields: [
-    { name: "poll", type: "relationship", relationTo: "polls", required: true, index: true },
-    { name: "trip", type: "relationship", relationTo: "trips", required: true, index: true },
+    { name: "poll", type: "relationship", relationTo: "polls", required: true, index: true, ...locked },
+    { name: "trip", type: "relationship", relationTo: "trips", required: true, index: true, ...locked },
     {
       name: "kind",
       type: "select",
       required: true,
+      ...locked,
       options: [
         { label: "Date", value: "date" },
         { label: "Location", value: "location" },
@@ -33,9 +43,10 @@ export const PollOptions: CollectionConfig = {
       name: "suggestedBy",
       type: "relationship",
       relationTo: "memberships",
+      ...locked,
       admin: { description: "The participant who suggested it; null = organizer-seeded." },
     },
-    { name: "hidden", type: "checkbox", defaultValue: false, admin: { description: "Moderated out of the vote." } },
+    { name: "hidden", type: "checkbox", defaultValue: false, ...locked, admin: { description: "Moderated out of the vote." } },
     { name: "order", type: "number", defaultValue: 0 },
   ],
 };

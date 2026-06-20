@@ -31,6 +31,7 @@ import {
 import type { Trip } from "@/payload-types";
 
 import { AuditAction, recordAudit, type AuditActionKey } from "./audit";
+import { withTransaction } from "./transaction";
 
 // Re-export the domain lifecycle types so the app layer can name them without
 // importing `domain` directly (forbidden by the architecture boundary).
@@ -110,34 +111,36 @@ export async function transitionPhase(
   opts: TransitionOptions = {},
   req?: PayloadRequest,
 ): Promise<TransitionOutcome<TripPhase>> {
-  const trip = await payload.findByID({ collection: "trips", id: tripId, overrideAccess: true, req });
-  const from = snapshot(trip).phase;
+  return withTransaction(payload, req, async (req) => {
+    const trip = await payload.findByID({ collection: "trips", id: tripId, overrideAccess: true, req });
+    const from = snapshot(trip).phase;
 
-  const result = checkPhaseTransition(from, to);
-  if (!result.ok) throw new LifecycleTransitionError(result.reason);
+    const result = checkPhaseTransition(from, to);
+    if (!result.ok) throw new LifecycleTransitionError(result.reason);
 
-  const updated = await payload.update({
-    collection: "trips",
-    id: tripId,
-    overrideAccess: true,
-    req,
-    data: { phase: to },
+    const updated = await payload.update({
+      collection: "trips",
+      id: tripId,
+      overrideAccess: true,
+      req,
+      data: { phase: to },
+    });
+
+    await recordAudit(
+      payload,
+      {
+        actor: opts.actor,
+        action: AuditAction.LifecycleTransition,
+        targetType: "trip",
+        targetId: tripId,
+        trip: tripId,
+        metadata: { kind: "phase", from, to, reversal: result.reversal },
+      },
+      req,
+    );
+
+    return { trip: updated, from, to, reversal: result.reversal };
   });
-
-  await recordAudit(
-    payload,
-    {
-      actor: opts.actor,
-      action: AuditAction.LifecycleTransition,
-      targetType: "trip",
-      targetId: tripId,
-      trip: tripId,
-      metadata: { kind: "phase", from, to, reversal: result.reversal },
-    },
-    req,
-  );
-
-  return { trip: updated, from, to, reversal: result.reversal };
 }
 
 /**
@@ -154,40 +157,42 @@ export async function transitionArea<K extends AreaKind>(
   opts: TransitionOptions = {},
   req?: PayloadRequest,
 ): Promise<TransitionOutcome<AreaStates[K]>> {
-  const trip = await payload.findByID({ collection: "trips", id: tripId, overrideAccess: true, req });
-  const state = snapshot(trip);
-  const from = state[area] as AreaStates[K];
+  return withTransaction(payload, req, async (req) => {
+    const trip = await payload.findByID({ collection: "trips", id: tripId, overrideAccess: true, req });
+    const state = snapshot(trip);
+    const from = state[area] as AreaStates[K];
 
-  const result = checkAreaTransition(area, from, to, state);
-  if (!result.ok) throw new LifecycleTransitionError(result.reason);
+    const result = checkAreaTransition(area, from, to, state);
+    if (!result.ok) throw new LifecycleTransitionError(result.reason);
 
-  const updated = await payload.update({
-    collection: "trips",
-    id: tripId,
-    overrideAccess: true,
-    req,
-    data: { [AREA_FIELD[area]]: to } as Partial<Trip>,
+    const updated = await payload.update({
+      collection: "trips",
+      id: tripId,
+      overrideAccess: true,
+      req,
+      data: { [AREA_FIELD[area]]: to } as Partial<Trip>,
+    });
+
+    const action =
+      area === "finance"
+        ? financeAuditAction(to as FinanceState, result.reversal)
+        : AuditAction.LifecycleTransition;
+
+    await recordAudit(
+      payload,
+      {
+        actor: opts.actor,
+        action,
+        targetType: "trip",
+        targetId: tripId,
+        trip: tripId,
+        metadata: { kind: "area", area, from, to, reversal: result.reversal },
+      },
+      req,
+    );
+
+    return { trip: updated, from, to, reversal: result.reversal };
   });
-
-  const action =
-    area === "finance"
-      ? financeAuditAction(to as FinanceState, result.reversal)
-      : AuditAction.LifecycleTransition;
-
-  await recordAudit(
-    payload,
-    {
-      actor: opts.actor,
-      action,
-      targetType: "trip",
-      targetId: tripId,
-      trip: tripId,
-      metadata: { kind: "area", area, from, to, reversal: result.reversal },
-    },
-    req,
-  );
-
-  return { trip: updated, from, to, reversal: result.reversal };
 }
 
 // --- Legal-transition listing (for the console UI) --------------------------

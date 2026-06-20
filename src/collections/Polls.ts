@@ -1,6 +1,11 @@
 import type { CollectionConfig } from "payload";
 
-import { pollsAccess } from "@/access";
+import { pollsAccess, serviceOwnedField } from "@/access";
+import { rejectIfArchived, rejectDeleteWhenArchived } from "./guards";
+
+// Poll state (method, published, winner) changes only through the poll service,
+// never a direct write — keeping voting/close guards and audit authoritative.
+const serviceField = { access: { update: serviceOwnedField } } as const;
 
 /**
  * Poll — the date/time and location votes for a trip (T-301, PRD §8.2). Exactly
@@ -17,14 +22,16 @@ export const Polls: CollectionConfig = {
   slug: "polls",
   admin: { useAsTitle: "kind", defaultColumns: ["kind", "trip", "method", "published"] },
   access: pollsAccess,
+  hooks: { beforeChange: [rejectIfArchived], beforeDelete: [rejectDeleteWhenArchived("polls")] },
   indexes: [{ fields: ["trip", "kind"], unique: true }],
   fields: [
-    { name: "trip", type: "relationship", relationTo: "trips", required: true, index: true },
+    { name: "trip", type: "relationship", relationTo: "trips", required: true, index: true, access: { update: serviceOwnedField } },
     {
       name: "kind",
       type: "select",
       required: true,
       index: true,
+      access: { update: serviceOwnedField },
       options: [
         { label: "Date", value: "date" },
         { label: "Location", value: "location" },
@@ -34,6 +41,7 @@ export const Polls: CollectionConfig = {
       name: "method",
       type: "select",
       defaultValue: "approval",
+      ...serviceField,
       options: [
         { label: "Approval (Yes / If-needed / No)", value: "approval" },
         { label: "Availability grid", value: "grid" },
@@ -45,12 +53,14 @@ export const Polls: CollectionConfig = {
       name: "published",
       type: "checkbox",
       defaultValue: false,
+      ...serviceField,
       admin: { description: "Draft while the organizer seeds options; published opens voting." },
     },
     {
       name: "winnerOption",
       type: "relationship",
       relationTo: "poll-options",
+      ...serviceField,
       admin: { description: "Set when the poll is closed and the winner is promoted to the trip." },
     },
   ],

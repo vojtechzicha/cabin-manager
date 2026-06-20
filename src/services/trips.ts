@@ -15,6 +15,8 @@ import type { Payload, PayloadRequest } from "payload";
 import type { MembershipRole } from "@/access";
 import type { Identity, Membership, Trip } from "@/payload-types";
 
+import { withTransaction } from "./transaction";
+
 /** Trip branding (PRD §8.1, §12) — the only per-trip visual knobs. */
 export interface TripThemeInput {
   color?: string;
@@ -55,43 +57,46 @@ export async function createTrip(
   organizer: Identity,
   req?: PayloadRequest,
 ): Promise<CreateTripResult> {
-  const trip = await payload.create({
-    collection: "trips",
-    overrideAccess: true,
-    req,
-    data: {
-      name: input.name,
-      shortName: input.shortName,
-      location: input.location,
-      description: input.description,
-      theme: buildTheme(input),
-      createdBy: organizer.id,
-    },
-  });
+  // Atomic: a failure must not leave an orphan trip with no organizer membership.
+  return withTransaction(payload, req, async (req) => {
+    const trip = await payload.create({
+      collection: "trips",
+      overrideAccess: true,
+      req,
+      data: {
+        name: input.name,
+        shortName: input.shortName,
+        location: input.location,
+        description: input.description,
+        theme: buildTheme(input),
+        createdBy: organizer.id,
+      },
+    });
 
-  const organizerMembership = await payload.create({
-    collection: "memberships",
-    overrideAccess: true,
-    req,
-    data: {
-      trip: trip.id,
-      identity: organizer.id,
-      role: "organizer",
-      status: "active",
-      isBanker: true,
-      displayName: organizer.displayName ?? undefined,
-    },
-  });
+    const organizerMembership = await payload.create({
+      collection: "memberships",
+      overrideAccess: true,
+      req,
+      data: {
+        trip: trip.id,
+        identity: organizer.id,
+        role: "organizer",
+        status: "active",
+        isBanker: true,
+        displayName: organizer.displayName ?? undefined,
+      },
+    });
 
-  const withBanker = await payload.update({
-    collection: "trips",
-    id: trip.id,
-    overrideAccess: true,
-    req,
-    data: { banker: { membership: organizerMembership.id } },
-  });
+    const withBanker = await payload.update({
+      collection: "trips",
+      id: trip.id,
+      overrideAccess: true,
+      req,
+      data: { banker: { membership: organizerMembership.id } },
+    });
 
-  return { trip: withBanker, organizerMembership };
+    return { trip: withBanker, organizerMembership };
+  });
 }
 
 /** Partial trip configuration the organizer console can save (PRD §8.1). */
@@ -175,6 +180,11 @@ export async function listMemberTrips(
         overrideAccess: true,
         req,
       });
+      // Draft trips are invisible to participants (PRD §7) — only their
+      // organizers see them in the picker. (This loader uses overrideAccess, so
+      // it must reproduce the `tripsAccess.read` draft rule itself.)
+      const isOrganizer = membership.role === "organizer" || membership.role === "co-organizer";
+      if (trip.phase === "draft" && !isOrganizer) continue;
       out.push({ trip, membership });
     } catch {
       // Trip deleted out from under a stale membership — skip it.
@@ -272,38 +282,48 @@ export async function setBanker(
   input: SetBankerInput,
   req?: PayloadRequest,
 ): Promise<Trip> {
-  const memberships = await payload.find({
-    collection: "memberships",
-    where: { trip: { equals: tripId } },
-    overrideAccess: true,
-    depth: 0,
-    pagination: false,
-    limit: 1000,
-    req,
-  });
-  for (const m of memberships.docs) {
-    const shouldBank = String(m.id) === String(input.membershipId);
-    if ((m.isBanker ?? false) !== shouldBank) {
-      await payload.update({
-        collection: "memberships",
-        id: m.id,
-        overrideAccess: true,
-        req,
-        data: { isBanker: shouldBank },
-      });
+  // Atomic: flipping the old/new banker flags and writing the trip's banker
+  // details must commit together.
+  return withTransaction(payload, req, async (req) => {
+    const memberships = await payload.find({
+      collection: "memberships",
+      where: { trip: { equals: tripId } },
+      overrideAccess: true,
+      depth: 0,
+      pagination: false,
+      limit: 1000,
+      req,
+    });
+    // The banker must be an active member of *this* trip (PRD §8.1) — validated
+    // here so every caller is protected, not just the server action.
+    const target = memberships.docs.find((m) => String(m.id) === String(input.membershipId));
+    if (!target || target.status !== "active") {
+      throw new Error("The banker must be an active member of this trip.");
     }
-  }
-  return payload.update({
-    collection: "trips",
-    id: tripId,
-    overrideAccess: true,
-    req,
-    data: {
-      banker: {
-        membership: input.membershipId,
-        bankAccount: input.bankAccount ?? null,
-        iban: input.iban ?? null,
+    for (const m of memberships.docs) {
+      const shouldBank = String(m.id) === String(input.membershipId);
+      if ((m.isBanker ?? false) !== shouldBank) {
+        await payload.update({
+          collection: "memberships",
+          id: m.id,
+          overrideAccess: true,
+          req,
+          data: { isBanker: shouldBank },
+        });
+      }
+    }
+    return payload.update({
+      collection: "trips",
+      id: tripId,
+      overrideAccess: true,
+      req,
+      data: {
+        banker: {
+          membership: input.membershipId,
+          bankAccount: input.bankAccount ?? null,
+          iban: input.iban ?? null,
+        },
       },
-    },
+    });
   });
 }

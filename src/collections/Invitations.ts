@@ -1,6 +1,7 @@
 import type { CollectionConfig } from "payload";
 
 import { invitationsAccess } from "@/access";
+import { rejectInviteWhenClosed } from "./guards";
 
 /**
  * Invitation — a tokenized join request for a trip (PRD §5, §9). Created by an
@@ -18,6 +19,7 @@ export const Invitations: CollectionConfig = {
     defaultColumns: ["targetValue", "trip", "status", "source", "expiresAt"],
   },
   access: invitationsAccess,
+  hooks: { beforeChange: [rejectInviteWhenClosed] },
   fields: [
     { name: "trip", type: "relationship", relationTo: "trips", required: true, index: true },
     {

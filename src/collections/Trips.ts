@@ -1,6 +1,15 @@
 import type { CollectionConfig } from "payload";
 
-import { tripsAccess } from "@/access";
+import { tripsAccess, serviceOwnedField } from "@/access";
+import { rejectArchivedTripWrite, rejectArchivedTripDelete } from "./guards";
+
+/**
+ * Lifecycle, poll-lock, promoted, and banker fields are **service-owned**: they
+ * change only through the lifecycle/poll/banker services (which run with
+ * `overrideAccess`), never a direct REST/GraphQL write — so the state machine and
+ * the audit log can't be bypassed. The reusable deny-write field access.
+ */
+const lifecycleField = { access: { update: serviceOwnedField } } as const;
 
 /**
  * Trip (internally a *Chata*) — one group stay (PRD §8.1, §9). Holds the trip's
@@ -19,6 +28,12 @@ export const Trips: CollectionConfig = {
     defaultColumns: ["name", "shortName", "phase", "financeState"],
   },
   access: tripsAccess,
+  hooks: {
+    // An archived trip is read-only history: block edits (except un-archiving)
+    // and deletion until it's un-archived (PRD §7).
+    beforeChange: [rejectArchivedTripWrite],
+    beforeDelete: [rejectArchivedTripDelete],
+  },
   fields: [
     { name: "name", type: "text", required: true },
     {
@@ -67,6 +82,7 @@ export const Trips: CollectionConfig = {
       type: "select",
       defaultValue: "draft",
       index: true,
+      ...lifecycleField,
       options: [
         { label: "Draft", value: "draft" },
         { label: "Ideation", value: "ideation" },
@@ -80,6 +96,7 @@ export const Trips: CollectionConfig = {
       name: "datePollState",
       type: "select",
       defaultValue: "open",
+      ...lifecycleField,
       options: [
         { label: "Open", value: "open" },
         { label: "Closed", value: "closed" },
@@ -89,6 +106,7 @@ export const Trips: CollectionConfig = {
       name: "locationPollState",
       type: "select",
       defaultValue: "open",
+      ...lifecycleField,
       options: [
         { label: "Open", value: "open" },
         { label: "Closed", value: "closed" },
@@ -98,6 +116,7 @@ export const Trips: CollectionConfig = {
       name: "rosterState",
       type: "select",
       defaultValue: "open",
+      ...lifecycleField,
       options: [
         { label: "Open", value: "open" },
         { label: "Locked", value: "locked" },
@@ -107,6 +126,7 @@ export const Trips: CollectionConfig = {
       name: "financeState",
       type: "select",
       defaultValue: "open",
+      ...lifecycleField,
       options: [
         { label: "Open", value: "open" },
         { label: "Settling", value: "settling" },
@@ -116,6 +136,7 @@ export const Trips: CollectionConfig = {
     {
       name: "dates",
       type: "group",
+      ...lifecycleField,
       admin: { description: "Promoted from the date poll when it closes (T-305)." },
       fields: [
         { name: "start", type: "date" },
@@ -125,6 +146,7 @@ export const Trips: CollectionConfig = {
     {
       name: "banker",
       type: "group",
+      ...lifecycleField,
       admin: { description: "Banker bank details for settlement QR codes (PRD §8.5.4)." },
       fields: [
         {

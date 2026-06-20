@@ -19,6 +19,7 @@ import {
 import type { Membership, Poll, PollOption, Trip, Vote } from "@/payload-types";
 
 import { transitionArea } from "./lifecycle";
+import { withTransaction } from "./transaction";
 
 // Re-export so the app layer can name vote values without importing `domain`
 // directly (architecture boundary, mirrors how lifecycle re-exports its types).
@@ -205,6 +206,9 @@ export async function setPollMethod(
   method: PollMethod,
   req?: PayloadRequest,
 ): Promise<Poll> {
+  const trip = await payload.findByID({ collection: "trips", id: tripId, overrideAccess: true, depth: 0, req });
+  const closed = kind === "date" ? trip.datePollState === "closed" : trip.locationPollState === "closed";
+  if (closed) throw new PollCloseError("This poll is closed — its method can't be changed.");
   const poll = await getOrCreatePoll(payload, tripId, kind, req);
   return payload.update({ collection: "polls", id: String(poll.id), overrideAccess: true, req, data: { method } });
 }
@@ -287,71 +291,92 @@ export async function castVote(payload: Payload, input: CastVoteInput, req?: Pay
 
 // --- Closing & promotion (organizer, T-305) ---------------------------------
 
-/** Close the date poll, record the winner, and promote its window to `trip.dates`. */
+/** Thrown when a poll close is rejected (invalid winner, unpublished poll, …). */
+export class PollCloseError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PollCloseError";
+  }
+}
+
+/**
+ * Validate a proposed winner against the poll it's supposed to win: same trip,
+ * same poll, correct kind, visible (not hidden), and the poll actually opened.
+ */
+async function validateWinner(
+  payload: Payload,
+  tripId: string,
+  kind: PollKind,
+  winnerOptionId: string,
+  req?: PayloadRequest,
+): Promise<{ winner: PollOption; poll: Poll }> {
+  const poll = await getOrCreatePoll(payload, tripId, kind, req);
+  let winner: PollOption;
+  try {
+    winner = (await payload.findByID({ collection: "poll-options", id: winnerOptionId, overrideAccess: true, depth: 0, req })) as PollOption;
+  } catch {
+    throw new PollCloseError("The selected winner does not exist.");
+  }
+  if (relId(winner.trip) !== String(tripId)) throw new PollCloseError("The winner belongs to a different trip.");
+  if (relId(winner.poll) !== String(poll.id)) throw new PollCloseError("The winner belongs to a different poll.");
+  if (winner.kind !== kind) throw new PollCloseError("The winner is the wrong kind of option.");
+  if (winner.hidden) throw new PollCloseError("A hidden option can't be the winner.");
+  if (!poll.published) throw new PollCloseError("This poll was never opened for voting.");
+  return { winner, poll };
+}
+
+/** Close the date poll, record the winner, and promote its window to `trip.dates`. Idempotent. */
 export async function closeDatePoll(
   payload: Payload,
   tripId: string,
   opts: { actor?: string | null; winnerOptionId: string },
   req?: PayloadRequest,
 ): Promise<Trip> {
-  const winner = (await payload.findByID({
-    collection: "poll-options",
-    id: opts.winnerOptionId,
-    overrideAccess: true,
-    req,
-  })) as PollOption;
+  const { winner, poll } = await validateWinner(payload, tripId, "date", opts.winnerOptionId, req);
+  if (!winner.dateStart) throw new PollCloseError("The winning window has no date range.");
 
-  await transitionArea(payload, tripId, "datePoll", "closed", { actor: opts.actor }, req);
-  const poll = await getOrCreatePoll(payload, tripId, "date", req);
-  await payload.update({
-    collection: "polls",
-    id: String(poll.id),
-    overrideAccess: true,
-    req,
-    data: { winnerOption: opts.winnerOptionId },
-  });
-  return payload.update({
-    collection: "trips",
-    id: tripId,
-    overrideAccess: true,
-    req,
-    data: { dates: { start: winner.dateStart ?? null, end: winner.dateEnd ?? null } },
+  // Atomic: lock the poll, record the winner, and promote the dates together.
+  return withTransaction(payload, req, async (req) => {
+    const trip = await payload.findByID({ collection: "trips", id: tripId, overrideAccess: true, req });
+    if (trip.datePollState !== "closed") {
+      await transitionArea(payload, tripId, "datePoll", "closed", { actor: opts.actor }, req);
+    }
+    await payload.update({ collection: "polls", id: String(poll.id), overrideAccess: true, req, data: { winnerOption: opts.winnerOptionId } });
+    return payload.update({
+      collection: "trips",
+      id: tripId,
+      overrideAccess: true,
+      req,
+      data: { dates: { start: winner.dateStart, end: winner.dateEnd ?? null } },
+    });
   });
 }
 
-/** Close the location poll, record the winner, and promote its label to `trip.location`. */
+/** Close the location poll, record the winner, and promote its label to `trip.location`. Idempotent. */
 export async function closeLocationPoll(
   payload: Payload,
   tripId: string,
   opts: { actor?: string | null; winnerOptionId: string },
   req?: PayloadRequest,
 ): Promise<Trip> {
-  const winner = (await payload.findByID({
-    collection: "poll-options",
-    id: opts.winnerOptionId,
-    overrideAccess: true,
-    req,
-  })) as PollOption;
+  const { winner, poll } = await validateWinner(payload, tripId, "location", opts.winnerOptionId, req);
+  if (!winner.label) throw new PollCloseError("The winning option has no location label.");
 
-  await transitionArea(payload, tripId, "locationPoll", "closed", { actor: opts.actor }, req);
-  const poll = await getOrCreatePoll(payload, tripId, "location", req);
-  await payload.update({
-    collection: "polls",
-    id: String(poll.id),
-    overrideAccess: true,
-    req,
-    data: { winnerOption: opts.winnerOptionId },
-  });
-  return payload.update({
-    collection: "trips",
-    id: tripId,
-    overrideAccess: true,
-    req,
-    data: { location: winner.label ?? undefined },
+  return withTransaction(payload, req, async (req) => {
+    const trip = await payload.findByID({ collection: "trips", id: tripId, overrideAccess: true, req });
+    if (trip.locationPollState !== "closed") {
+      await transitionArea(payload, tripId, "locationPoll", "closed", { actor: opts.actor }, req);
+    }
+    await payload.update({ collection: "polls", id: String(poll.id), overrideAccess: true, req, data: { winnerOption: opts.winnerOptionId } });
+    return payload.update({ collection: "trips", id: tripId, overrideAccess: true, req, data: { location: winner.label } });
   });
 }
 
-/** Re-open a closed poll (clears the winner; the lifecycle reversal is audited). */
+/**
+ * Re-open a closed poll: clears the recorded winner and (for the date poll)
+ * **un-promotes** the trip dates, so a stale "chosen" window isn't left showing
+ * as decided. The lifecycle reversal itself is audited.
+ */
 export async function reopenPoll(
   payload: Payload,
   tripId: string,
@@ -359,9 +384,14 @@ export async function reopenPoll(
   opts: { actor?: string | null } = {},
   req?: PayloadRequest,
 ): Promise<void> {
-  await transitionArea(payload, tripId, kind === "date" ? "datePoll" : "locationPoll", "open", { actor: opts.actor }, req);
-  const poll = await getPoll(payload, tripId, kind, req);
-  if (poll) {
-    await payload.update({ collection: "polls", id: String(poll.id), overrideAccess: true, req, data: { winnerOption: null } });
-  }
+  await withTransaction(payload, req, async (req) => {
+    await transitionArea(payload, tripId, kind === "date" ? "datePoll" : "locationPoll", "open", { actor: opts.actor }, req);
+    const poll = await getPoll(payload, tripId, kind, req);
+    if (poll) {
+      await payload.update({ collection: "polls", id: String(poll.id), overrideAccess: true, req, data: { winnerOption: null } });
+    }
+    if (kind === "date") {
+      await payload.update({ collection: "trips", id: tripId, overrideAccess: true, req, data: { dates: { start: null, end: null } } });
+    }
+  });
 }

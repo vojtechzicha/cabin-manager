@@ -68,6 +68,7 @@ describe("voting service (T-301/302/305, PRD §8.2)", () => {
     // location poll defaults to single-choice
     const prague = await addOption(payload, { tripId, kind: "location", label: "Prague" });
     const brno = await addOption(payload, { tripId, kind: "location", label: "Brno" });
+    await publishPoll(payload, tripId, "location"); // votes require a published poll
     const mid = String(voter!.id);
 
     await castVote(payload, { tripId, kind: "location", membershipId: mid, optionId: String(prague.id), value: "yes" });
@@ -87,6 +88,7 @@ describe("voting service (T-301/302/305, PRD §8.2)", () => {
     const voters = await addVoters(tripId, ["A", "B", "C", "D"]);
     const w1 = await addOption(payload, { tripId, kind: "date", dateStart: "2026-06-21", dateEnd: "2026-06-28", order: 1 });
     const w2 = await addOption(payload, { tripId, kind: "date", dateStart: "2026-08-02", dateEnd: "2026-08-09", order: 2 });
+    await publishPoll(payload, tripId, "date"); // votes require a published poll
 
     // w1: 3 yes + 1 if-needed; w2: 2 yes + 2 no
     const w1vals: ("yes" | "ifneeded" | "no")[] = ["yes", "yes", "yes", "ifneeded"];
@@ -137,5 +139,62 @@ describe("voting service (T-301/302/305, PRD §8.2)", () => {
     const trip = (await payload.findByID({ collection: "trips", id: tripId, overrideAccess: true })) as Trip;
     expect(trip.locationPollState).toBe("closed");
     expect(trip.location).toBe("Beskydy");
+  });
+});
+
+describe("voting hardening (P0 — data integrity)", () => {
+  it("rejects votes on an unpublished poll", async () => {
+    const tripId = await newTrip("Unpub");
+    const [voter] = await addVoters(tripId, ["V"]);
+    const o = await addOption(payload, { tripId, kind: "date", dateStart: "2026-06-21", dateEnd: "2026-06-28" });
+    await expect(
+      castVote(payload, { tripId, kind: "date", membershipId: String(voter!.id), optionId: String(o.id), value: "yes" }),
+    ).rejects.toThrow(/not open for voting/i);
+  });
+
+  it("rejects votes on a hidden option and after the poll is closed", async () => {
+    const tripId = await newTrip("Locked");
+    const [voter] = await addVoters(tripId, ["V"]);
+    await publishPoll(payload, tripId, "date");
+    const hidden = await addOption(payload, { tripId, kind: "date", dateStart: "2026-06-21", dateEnd: "2026-06-28" });
+    await moderateOption(payload, String(hidden.id), "hide");
+    await expect(
+      castVote(payload, { tripId, kind: "date", membershipId: String(voter!.id), optionId: String(hidden.id), value: "yes" }),
+    ).rejects.toThrow(/hidden/i);
+
+    const winner = await addOption(payload, { tripId, kind: "date", dateStart: "2026-07-05", dateEnd: "2026-07-12" });
+    await closeDatePoll(payload, tripId, { actor: organizer.id, winnerOptionId: String(winner.id) });
+    await expect(
+      castVote(payload, { tripId, kind: "date", membershipId: String(voter!.id), optionId: String(winner.id), value: "yes" }),
+    ).rejects.toThrow(/closed/i);
+  });
+
+  it("rejects closing with a winner from another trip, and is idempotent", async () => {
+    const a = await newTrip("TripA");
+    const b = await newTrip("TripB");
+    await publishPoll(payload, a, "date");
+    const optA = await addOption(payload, { tripId: a, kind: "date", dateStart: "2026-06-21", dateEnd: "2026-06-28" });
+    const optB = await addOption(payload, { tripId: b, kind: "date", dateStart: "2026-06-21", dateEnd: "2026-06-28" });
+
+    await expect(
+      closeDatePoll(payload, a, { actor: organizer.id, winnerOptionId: String(optB.id) }),
+    ).rejects.toThrow(/different trip/i);
+
+    await closeDatePoll(payload, a, { actor: organizer.id, winnerOptionId: String(optA.id) });
+    // Idempotent: closing again doesn't throw a "same-state" lifecycle error.
+    await closeDatePoll(payload, a, { actor: organizer.id, winnerOptionId: String(optA.id) });
+    const trip = (await payload.findByID({ collection: "trips", id: a, overrideAccess: true })) as Trip;
+    expect(trip.datePollState).toBe("closed");
+  });
+
+  it("clears promoted trip dates when a date poll is reopened", async () => {
+    const tripId = await newTrip("Reopen");
+    await publishPoll(payload, tripId, "date");
+    const o = await addOption(payload, { tripId, kind: "date", dateStart: "2026-06-21", dateEnd: "2026-06-28" });
+    await closeDatePoll(payload, tripId, { actor: organizer.id, winnerOptionId: String(o.id) });
+    await reopenPoll(payload, tripId, "date", { actor: organizer.id });
+    const trip = (await payload.findByID({ collection: "trips", id: tripId, overrideAccess: true })) as Trip;
+    expect(trip.datePollState).toBe("open");
+    expect(trip.dates?.start ?? null).toBeNull();
   });
 });

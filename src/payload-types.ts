@@ -301,6 +301,10 @@ export interface Media {
    * Accessibility description.
    */
   alt?: string | null;
+  /**
+   * The Identity that uploaded this asset.
+   */
+  owner?: (string | null) | Identity;
   updatedAt: string;
   createdAt: string;
   url?: string | null;
@@ -1072,6 +1076,7 @@ export interface AuditEntriesSelect<T extends boolean = true> {
  */
 export interface MediaSelect<T extends boolean = true> {
   alt?: T;
+  owner?: T;
   updatedAt?: T;
   createdAt?: T;
   url?: T;

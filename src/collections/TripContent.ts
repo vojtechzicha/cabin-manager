@@ -1,6 +1,7 @@
 import type { CollectionConfig } from "payload";
 
 import { tripContentAccess } from "@/access";
+import { rejectIfArchived, rejectDeleteWhenArchived } from "./guards";
 
 /**
  * Trip info & content (build.md T-203, PRD §8.7) — the read-mostly reference
@@ -23,6 +24,7 @@ export const TripContent: CollectionConfig = {
     defaultColumns: ["trip", "updatedAt"],
   },
   access: tripContentAccess,
+  hooks: { beforeChange: [rejectIfArchived], beforeDelete: [rejectDeleteWhenArchived("trip-content")] },
   fields: [
     {
       name: "trip",

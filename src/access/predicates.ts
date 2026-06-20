@@ -133,3 +133,29 @@ export const isAuthenticated: Access = ({ req }) => Boolean(currentUser(req));
 
 /** Field access: only the platform admin may write the field. */
 export const isPlatformAdminField: FieldAccess = ({ req }) => isPlatformAdminReq(req);
+
+/**
+ * Field access that denies all non-elevated writes: the field is **service-owned
+ * state**, set only through the service layer (which runs with `overrideAccess`,
+ * bypassing field access). Use it to keep lifecycle/promoted/immutable fields out
+ * of reach of direct REST/GraphQL writes, so guards + audit can't be bypassed.
+ */
+export const serviceOwnedField: FieldAccess = () => false;
+
+const refId = (v: unknown): string | null =>
+  v && typeof v === "object" ? String((v as { id: unknown }).id) : v != null ? String(v) : null;
+
+/**
+ * Field read access for a Membership's banking columns (refund account / IBAN):
+ * visible only to the member themselves, the trip's organizers, or its banker —
+ * never the whole roster (PRD §5/§10 least-privilege).
+ */
+export const bankingFieldRead: FieldAccess = async ({ req, doc }) => {
+  if (isPlatformAdminReq(req)) return true;
+  const user = currentUser(req);
+  if (!user || !doc) return false;
+  const record = doc as { identity?: unknown; trip?: unknown };
+  if (refId(record.identity) === user.id) return true;
+  const tripId = refId(record.trip);
+  return (await isOrganizerOf(req, tripId)) || (await isBankerOf(req, tripId));
+};

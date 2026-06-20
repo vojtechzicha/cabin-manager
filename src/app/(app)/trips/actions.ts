@@ -13,6 +13,8 @@ import type { Payload } from "payload";
 
 import type { Identity } from "@/payload-types";
 import { createDirectInvite, approveJoinRequest, disableOpenJoin, enableOpenJoin } from "@/services/invitations";
+import { deliverInvite } from "@/services/delivery";
+import { getRequestLocale } from "@/i18n/server";
 import {
   transitionArea,
   transitionPhase,
@@ -27,6 +29,7 @@ import {
   castVote,
   closeDatePoll,
   closeLocationPoll,
+  getPoll,
   moderateOption,
   publishPoll,
   removeOption,
@@ -46,7 +49,7 @@ import {
 } from "@/services/trips";
 
 import { getCurrentIdentity, requireIdentity } from "../auth/current-user";
-import type { FormState } from "./form-state";
+import type { FormState, InviteState } from "./form-state";
 
 /**
  * If the form carried a cover-photo file, upload it to the Media collection
@@ -93,6 +96,25 @@ async function requireMember(
     throw new Error("Not authorized: trip members only.");
   }
   return { payload, identity, membershipId: String(membership.id) };
+}
+
+const refId = (v: unknown): string =>
+  v && typeof v === "object" ? String((v as { id: unknown }).id) : String(v);
+
+/** Reject a target that doesn't belong to `tripId` — actions authorize a trip,
+ * then must not accept an id from a *different* trip (cross-trip tampering). */
+async function assertMembershipInTrip(payload: Payload, tripId: string, membershipId: string): Promise<void> {
+  const m = await payload
+    .findByID({ collection: "memberships", id: membershipId, overrideAccess: true, depth: 0 })
+    .catch(() => null);
+  if (!m || refId(m.trip) !== tripId) throw new Error("That member does not belong to this trip.");
+}
+
+async function assertOptionInTrip(payload: Payload, tripId: string, optionId: string): Promise<void> {
+  const o = await payload
+    .findByID({ collection: "poll-options", id: optionId, overrideAccess: true, depth: 0 })
+    .catch(() => null);
+  if (!o || refId(o.trip) !== tripId) throw new Error("That option does not belong to this trip.");
 }
 
 const str = (v: FormDataEntryValue | null): string | undefined => {
@@ -184,6 +206,7 @@ export async function setBankerAction(
   const { payload } = await requireOrganizer(tripId);
   const membershipId = str(formData.get("banker"));
   if (!membershipId) return { fieldErrors: { banker: "required" } };
+  await assertMembershipInTrip(payload, tripId, membershipId);
 
   const account = str(formData.get("bankAccount"));
   let iban = str(formData.get("iban"));
@@ -225,31 +248,53 @@ export async function transitionAreaAction(
 
 // --- People & invitations (T-104/T-201) -------------------------------------
 
-/** Returns the raw invite URL so the organizer can copy/share it. */
+type InviteTarget = "email" | "phone" | "handle" | "name";
+const INVITE_TARGETS = new Set<InviteTarget>(["email", "phone", "handle", "name"]);
+
+/**
+ * Create a direct invite by email, phone, Telegram handle, or name (PRD §5).
+ * Returns the invite URL plus **share intents** so the organizer can send it over
+ * any channel, and (for an email target) fires an email through delivery.
+ */
 export async function createInviteAction(
   tripId: string,
-  _prev: { url?: string; error?: string } | null,
+  _prev: InviteState,
   formData: FormData,
-): Promise<{ url?: string; error?: string }> {
-  const { payload } = await requireOrganizer(tripId);
-  const email = str(formData.get("email"));
-  if (!email) return { error: "Email is required." };
+): Promise<NonNullable<InviteState>> {
+  const { payload, identity } = await requireOrganizer(tripId);
+  const rawType = str(formData.get("targetType")) ?? "email";
+  const targetType = (INVITE_TARGETS.has(rawType as InviteTarget) ? rawType : "email") as InviteTarget;
+  const targetValue = str(formData.get("targetValue"));
+  if (!targetValue) return { error: "value_required" };
   try {
     const invite = await createDirectInvite(payload, {
       tripId,
-      targetType: "email",
-      targetValue: email,
+      targetType,
+      targetValue,
       displayName: str(formData.get("name")),
     });
+    const trip = await payload.findByID({ collection: "trips", id: tripId, overrideAccess: true, depth: 0 });
+    const delivery = await deliverInvite(payload, {
+      recipientLocale: await getRequestLocale(),
+      recipientName: str(formData.get("name")),
+      organizerName: identity.displayName ?? identity.email,
+      tripName: trip.name,
+      url: invite.url,
+      email: targetType === "email" ? targetValue : undefined,
+    });
     revalidatePath(`/trips/${tripId}/people`);
-    return { url: invite.url };
+    return { url: invite.url, shareIntents: delivery.shareIntents };
   } catch {
-    return { error: "Could not create the invite." };
+    return { error: "create_failed" };
   }
 }
 
 export async function approveJoinAction(tripId: string, membershipId: string): Promise<void> {
   const { payload } = await requireOrganizer(tripId);
+  await assertMembershipInTrip(payload, tripId, membershipId);
+  // Approving a join would grow a locked roster — block it (PRD §7).
+  const trip = await payload.findByID({ collection: "trips", id: tripId, overrideAccess: true, depth: 0 });
+  if (trip.rosterState === "locked") throw new Error("The roster is locked — no new members can be approved.");
   await approveJoinRequest(payload, membershipId);
   revalidatePath(`/trips/${tripId}/people`);
 }
@@ -260,6 +305,7 @@ export async function setRoleAction(
   role: "organizer" | "co-organizer" | "participant",
 ): Promise<void> {
   const { payload } = await requireOrganizer(tripId);
+  await assertMembershipInTrip(payload, tripId, membershipId);
   await setMembershipRole(payload, membershipId, role);
   revalidatePath(`/trips/${tripId}/people`);
 }
@@ -357,6 +403,13 @@ export async function suggestOptionAction(
   formData: FormData,
 ): Promise<void> {
   const { payload, membershipId } = await requireMember(tripId);
+  // Suggestions are only accepted while the poll is open to voters.
+  const poll = await getPoll(payload, tripId, kind);
+  const trip = await payload.findByID({ collection: "trips", id: tripId, overrideAccess: true, depth: 0 });
+  const lock = kind === "date" ? trip.datePollState : trip.locationPollState;
+  if (!poll?.published || lock === "closed") {
+    throw new Error("This poll isn't open for suggestions.");
+  }
   await addOption(payload, {
     tripId,
     kind,
@@ -387,6 +440,7 @@ export async function addOptionAction(
 
 export async function removeOptionAction(tripId: string, optionId: string): Promise<void> {
   const { payload } = await requireOrganizer(tripId);
+  await assertOptionInTrip(payload, tripId, optionId);
   await removeOption(payload, optionId);
   revalidatePath(`/trips/${tripId}/plan`);
 }
@@ -397,6 +451,7 @@ export async function moderateOptionAction(
   action: "promote" | "hide" | "unhide",
 ): Promise<void> {
   const { payload } = await requireOrganizer(tripId);
+  await assertOptionInTrip(payload, tripId, optionId);
   await moderateOption(payload, optionId, action);
   revalidatePath(`/trips/${tripId}/plan`);
 }

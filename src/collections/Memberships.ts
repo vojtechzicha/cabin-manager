@@ -1,6 +1,13 @@
-import type { CollectionConfig, FieldAccess } from "payload";
+import type { CollectionConfig, FieldAccess, Where } from "payload";
 
-import { membershipsAccess, isPlatformAdminField, isOrganizerOf } from "@/access";
+import {
+  membershipsAccess,
+  isPlatformAdminField,
+  isOrganizerOf,
+  serviceOwnedField,
+  bankingFieldRead,
+} from "@/access";
+import { rejectIfArchived, rejectIfRosterLocked, rejectMemberRemovalWhenClosed } from "./guards";
 
 /**
  * Membership — links one Identity to one Trip with a role and all trip-specific
@@ -34,9 +41,47 @@ export const Memberships: CollectionConfig = {
   access: membershipsAccess,
   indexes: [
     // One membership per (identity, trip). Pending rows have no identity yet, so
-    // the uniqueness is enforced in the invite service rather than a DB index.
+    // a plain unique index can't cover them; the beforeChange hook below enforces
+    // it at the data layer for claimed (identity-bearing) rows.
     { fields: ["trip", "identity"] },
   ],
+  hooks: {
+    beforeChange: [
+      // Enforce one membership per (trip, identity) at the data layer — a
+      // participant must not be able to join a trip twice, nor (with `trip`
+      // immutable below) relocate their row into another trip.
+      async ({ req, data, operation, originalDoc }) => {
+        const identity = data.identity ?? originalDoc?.identity;
+        const trip = data.trip ?? originalDoc?.trip;
+        if (!identity || !trip) return data; // pending rows (no identity) are exempt
+        const idOf = (v: unknown) =>
+          v && typeof v === "object" ? String((v as { id: unknown }).id) : String(v);
+        const clauses: Where[] = [
+          { trip: { equals: idOf(trip) } },
+          { identity: { equals: idOf(identity) } },
+        ];
+        if (operation === "update" && originalDoc?.id) {
+          clauses.push({ id: { not_equals: String(originalDoc.id) } });
+        }
+        // Read outside the write transaction (committed rows only) to avoid
+        // nesting a query in the create/update's own transaction.
+        const dupes = await req.payload.find({
+          collection: "memberships",
+          overrideAccess: true,
+          depth: 0,
+          limit: 1,
+          where: { and: clauses },
+        });
+        if (dupes.docs.length > 0) {
+          throw new Error("A membership for this person already exists in this trip.");
+        }
+        return data;
+      },
+      rejectIfArchived,
+      rejectIfRosterLocked,
+    ],
+    beforeDelete: [rejectMemberRemovalWhenClosed],
+  },
   fields: [
     {
       name: "trip",
@@ -44,12 +89,18 @@ export const Memberships: CollectionConfig = {
       relationTo: "trips",
       required: true,
       index: true,
+      // Immutable after creation: prevents a member relocating their row to
+      // another trip via a direct API edit (set once by the service on create).
+      access: { update: serviceOwnedField },
     },
     {
       name: "identity",
       type: "relationship",
       relationTo: "identities",
       index: true,
+      // Service-owned: set on create, then on invite-claim (both via
+      // overrideAccess). A member can never re-point their row at another identity.
+      access: { update: serviceOwnedField },
       admin: { description: "Null until the invitee logs in and claims the pending membership." },
     },
     {
@@ -116,9 +167,12 @@ export const Memberships: CollectionConfig = {
     {
       name: "bankAccount",
       type: "text",
+      // Personal banking is not roster-public: readable only by the member, the
+      // trip's organizers, and its banker (PRD §5/§10).
+      access: { read: bankingFieldRead },
       admin: { description: "Czech account for refunds (PRD §8.5.4)." },
     },
-    { name: "iban", type: "text" },
+    { name: "iban", type: "text", access: { read: bankingFieldRead } },
     {
       name: "preferredChannelOverride",
       type: "select",

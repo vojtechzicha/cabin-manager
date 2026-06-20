@@ -20,6 +20,7 @@ import type { Identity, Invitation, Membership, Trip } from "@/payload-types";
 
 import { AuthError } from "./auth-errors";
 import { ensureIdentity, normalizeEmail } from "./identity";
+import { withTransaction } from "./transaction";
 import { inviteUrl, openJoinUrl } from "./urls";
 
 /** Direct invites stay valid for two weeks. */
@@ -85,37 +86,38 @@ export async function createDirectInvite(
   const targetValue =
     targetType === "email" ? normalizeEmail(input.targetValue) : input.targetValue.trim();
 
-  const membership = await payload.create({
-    collection: "memberships",
-    overrideAccess: true,
-    req,
-    data: {
-      trip: input.tripId,
-      status: "pending",
-      role: input.role ?? "participant",
-      displayName: input.displayName ?? (targetType === "name" ? targetValue : undefined),
-    },
-  });
-
   const { raw, hash } = generateToken();
   const expiresAt = expiryFromNow(INVITE_TTL_MS);
-  const invitation = await payload.create({
-    collection: "invitations",
-    overrideAccess: true,
-    req,
-    data: {
-      trip: input.tripId,
-      membership: membership.id,
-      targetType,
-      targetValue,
-      tokenHash: hash,
-      status: "pending",
-      source: "direct",
-      expiresAt: expiresAt.toISOString(),
-    },
+  // Atomic: the pending membership and its invitation must be created together.
+  return withTransaction(payload, req, async (req) => {
+    const membership = await payload.create({
+      collection: "memberships",
+      overrideAccess: true,
+      req,
+      data: {
+        trip: input.tripId,
+        status: "pending",
+        role: input.role ?? "participant",
+        displayName: input.displayName ?? (targetType === "name" ? targetValue : undefined),
+      },
+    });
+    const invitation = await payload.create({
+      collection: "invitations",
+      overrideAccess: true,
+      req,
+      data: {
+        trip: input.tripId,
+        membership: membership.id,
+        targetType,
+        targetValue,
+        tokenHash: hash,
+        status: "pending",
+        source: "direct",
+        expiresAt: expiresAt.toISOString(),
+      },
+    });
+    return { invitation, membership, token: raw, url: inviteUrl(raw), expiresAt };
   });
-
-  return { invitation, membership, token: raw, url: inviteUrl(raw), expiresAt };
 }
 
 /**
@@ -234,17 +236,29 @@ export async function redeemInvitation(
 
   const membershipId = relId(invitation.membership);
   if (!membershipId) throw new AuthError("not_found", "Invitation has no membership");
-  const membership = await activatePendingMembership(payload, membershipId, identity, req);
+  const claimer = identity;
 
-  await payload.update({
-    collection: "invitations",
-    id: invitation.id,
-    overrideAccess: true,
-    req,
-    data: { status: "accepted", acceptedAt: new Date().toISOString() },
+  // Claim + activate atomically: the invite is flipped to accepted **only if it
+  // hasn't been already** (one conditional write — a concurrent redemption that
+  // loses the race modifies nothing and is rejected), and the membership is
+  // activated in the same transaction, so neither can succeed without the other.
+  // Identity provisioning happens above, outside the transaction (wrapping a
+  // create here trips a Payload/mongoose retry conflict with the membership
+  // hooks). The wrong-account check also runs above, so a mismatched attempt
+  // never burns the invite.
+  return withTransaction(payload, req, async (txReq) => {
+    const claim = await payload.update({
+      collection: "invitations",
+      overrideAccess: true,
+      req: txReq,
+      where: { and: [{ id: { equals: invitation.id } }, { acceptedAt: { exists: false } }] },
+      data: { status: "accepted", acceptedAt: new Date().toISOString() },
+    });
+    if (claim.docs.length === 0) throw new AuthError("used_token");
+
+    const membership = await activatePendingMembership(payload, membershipId, claimer, txReq);
+    return { identity: claimer, membership, tripId: relId(membership.trip) ?? "", created };
   });
-
-  return { identity, membership, tripId: relId(membership.trip) ?? "", created };
 }
 
 /**

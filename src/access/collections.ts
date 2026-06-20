@@ -11,7 +11,6 @@
 import type { Access, Where } from "payload";
 
 import {
-  isMemberOf,
   isOrganizerOf,
   isPlatformAdminReq,
   memberTripIds,
@@ -34,10 +33,21 @@ export const tripsAccess = {
   read: (async ({ req }) => {
     if (isPlatformAdminReq(req)) return true;
     if (!userId(req)) return false;
-    return { id: { in: await memberTripIds(req) } };
+    // A member reads their trips — but a **Draft** trip is invisible to
+    // participants (PRD §7); only its organizers (and admins) can see it.
+    const where: Where = {
+      and: [
+        { id: { in: await memberTripIds(req) } },
+        { or: [{ phase: { not_equals: "draft" } }, { id: { in: await organizerTripIds(req) } }] },
+      ],
+    };
+    return where;
   }) satisfies Access,
-  // Anyone signed in can spin up a trip; the creator is made its organizer.
-  create: (({ req }) => Boolean(userId(req))) satisfies Access,
+  // Trips are created **only through `createTrip`** (which atomically seats the
+  // organizer membership + default banker, all via `overrideAccess`). Denying
+  // direct API create stops orphan trips and arbitrary lifecycle values; the
+  // public `createTripAction` still works because the service runs elevated.
+  create: (({ req }) => isPlatformAdminReq(req)) satisfies Access,
   update: (async ({ req }) => {
     if (isPlatformAdminReq(req)) return true;
     if (!userId(req)) return false;
@@ -97,10 +107,10 @@ export const invitationsAccess = {
     if (!userId(req)) return false;
     return { trip: { in: await organizerTripIds(req) } };
   }) satisfies Access,
-  create: (async ({ req, data }) => {
-    if (isPlatformAdminReq(req)) return true;
-    return isOrganizerOf(req, data?.trip as string | undefined);
-  }) satisfies Access,
+  // Invitations are minted only through the invitation services (which create a
+  // matching pending membership in the same trip), so a raw API create can't
+  // attach an invitation to a membership from another trip.
+  create: (({ req }) => isPlatformAdminReq(req)) satisfies Access,
   update: (async ({ req }) => {
     if (isPlatformAdminReq(req)) return true;
     if (!userId(req)) return false;
@@ -154,10 +164,9 @@ export const pollsAccess = {
     if (!userId(req)) return false;
     return { trip: { in: await memberTripIds(req) } };
   }) satisfies Access,
-  create: (async ({ req, data }) => {
-    if (isPlatformAdminReq(req)) return true;
-    return isOrganizerOf(req, data?.trip as string | undefined);
-  }) satisfies Access,
+  // Polls are created only through the poll service (`getOrCreatePoll`), so a
+  // raw API create can't make one already-published or with a forged winner.
+  create: (({ req }) => isPlatformAdminReq(req)) satisfies Access,
   update: (async ({ req }) => {
     if (isPlatformAdminReq(req)) return true;
     if (!userId(req)) return false;
@@ -171,9 +180,11 @@ export const pollsAccess = {
 };
 
 /**
- * Poll options: members read all; **any member may create** one (participants
- * suggest options — flagged `suggestedBy`, §8.2), but only organizers may edit,
- * hide, promote, or delete them (moderation).
+ * Poll options: members read all; **creation goes only through the poll service**
+ * (`addOption`, used by both organizer seeding and `suggestOptionAction`), which
+ * stamps a consistent `poll`/`trip`/`kind` and the suggester. Denying direct API
+ * create stops forged options (mismatched trip/poll/kind, or a fake
+ * "organizer-seeded" option with empty `suggestedBy`) — §8.2.
  */
 export const pollOptionsAccess = {
   read: (async ({ req }) => {
@@ -181,10 +192,7 @@ export const pollOptionsAccess = {
     if (!userId(req)) return false;
     return { trip: { in: await memberTripIds(req) } };
   }) satisfies Access,
-  create: (async ({ req, data }) => {
-    if (isPlatformAdminReq(req)) return true;
-    return isMemberOf(req, data?.trip as string | undefined);
-  }) satisfies Access,
+  create: (({ req }) => isPlatformAdminReq(req)) satisfies Access,
   update: (async ({ req }) => {
     if (isPlatformAdminReq(req)) return true;
     if (!userId(req)) return false;
@@ -211,7 +219,12 @@ export const votesAccess = {
   }) satisfies Access,
   create: (async ({ req, data }) => {
     if (isPlatformAdminReq(req)) return true;
-    return isMemberOf(req, data?.trip as string | undefined);
+    // A vote may only be attributed to one of the caller's OWN memberships — you
+    // can't cast a vote as someone else. (The validation hook on Votes enforces
+    // poll/option/trip consistency and the poll's open/published state.)
+    const membershipId = data?.membership ? String(data.membership) : null;
+    if (!membershipId) return false;
+    return (await myMembershipIds(req)).includes(membershipId);
   }) satisfies Access,
   update: (async ({ req }) => {
     if (isPlatformAdminReq(req)) return true;
