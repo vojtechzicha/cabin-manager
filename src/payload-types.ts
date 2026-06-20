@@ -69,11 +69,13 @@ export interface Config {
   collections: {
     identities: Identity;
     trips: Trip;
+    'trip-content': TripContent;
     memberships: Membership;
     invitations: Invitation;
     'login-tokens': LoginToken;
     'health-checks': HealthCheck;
     'audit-entries': AuditEntry;
+    media: Media;
     'payload-kv': PayloadKv;
     'payload-locked-documents': PayloadLockedDocument;
     'payload-preferences': PayloadPreference;
@@ -83,11 +85,13 @@ export interface Config {
   collectionsSelect: {
     identities: IdentitiesSelect<false> | IdentitiesSelect<true>;
     trips: TripsSelect<false> | TripsSelect<true>;
+    'trip-content': TripContentSelect<false> | TripContentSelect<true>;
     memberships: MembershipsSelect<false> | MembershipsSelect<true>;
     invitations: InvitationsSelect<false> | InvitationsSelect<true>;
     'login-tokens': LoginTokensSelect<false> | LoginTokensSelect<true>;
     'health-checks': HealthChecksSelect<false> | HealthChecksSelect<true>;
     'audit-entries': AuditEntriesSelect<false> | AuditEntriesSelect<true>;
+    media: MediaSelect<false> | MediaSelect<true>;
     'payload-kv': PayloadKvSelect<false> | PayloadKvSelect<true>;
     'payload-locked-documents': PayloadLockedDocumentsSelect<false> | PayloadLockedDocumentsSelect<true>;
     'payload-preferences': PayloadPreferencesSelect<false> | PayloadPreferencesSelect<true>;
@@ -193,9 +197,16 @@ export interface Trip {
      * Accent color, e.g. #3b82f6.
      */
     color?: string | null;
+    /**
+     * Emoji glyph branding the trip.
+     */
     icon?: string | null;
     /**
-     * Cover/background image URL.
+     * Uploaded cover photo (stored in MongoDB/GridFS).
+     */
+    coverMedia?: (string | null) | Media;
+    /**
+     * Optional cover image URL override (used if no upload).
      */
     coverImage?: string | null;
   };
@@ -263,9 +274,9 @@ export interface Trip {
      */
     openJoinAutoAccept?: boolean | null;
     /**
-     * SHA-256 of the open-join link token (the raw token is never stored).
+     * The open-join link's shareable token. Unlike auth tokens (magic link / invites) this is stored in the clear, because it's a non-secret, approval-gated link the organizer needs to re-display and share repeatedly.
      */
-    openJoinTokenHash?: string | null;
+    openJoinToken?: string | null;
   };
   /**
    * Identity that created the trip (the first organizer).
@@ -273,6 +284,46 @@ export interface Trip {
   createdBy?: (string | null) | Identity;
   updatedAt: string;
   createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "media".
+ */
+export interface Media {
+  id: string;
+  /**
+   * Accessibility description.
+   */
+  alt?: string | null;
+  updatedAt: string;
+  createdAt: string;
+  url?: string | null;
+  thumbnailURL?: string | null;
+  filename?: string | null;
+  mimeType?: string | null;
+  filesize?: number | null;
+  width?: number | null;
+  height?: number | null;
+  focalX?: number | null;
+  focalY?: number | null;
+  sizes?: {
+    thumbnail?: {
+      url?: string | null;
+      width?: number | null;
+      height?: number | null;
+      mimeType?: string | null;
+      filesize?: number | null;
+      filename?: string | null;
+    };
+    card?: {
+      url?: string | null;
+      width?: number | null;
+      height?: number | null;
+      mimeType?: string | null;
+      filesize?: number | null;
+      filename?: string | null;
+    };
+  };
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
@@ -315,6 +366,128 @@ export interface Membership {
   bankAccount?: string | null;
   iban?: string | null;
   preferredChannelOverride?: ('email' | 'whatsapp' | 'telegram' | 'inapp') | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "trip-content".
+ */
+export interface TripContent {
+  id: string;
+  /**
+   * The trip this content belongs to (one row per trip).
+   */
+  trip: string | Trip;
+  /**
+   * The destination block (PRD §8.7).
+   */
+  destination?: {
+    /**
+     * e.g. Chata Pod Lysou.
+     */
+    name?: string | null;
+    /**
+     * Address / area, e.g. Krásná 142 · Beskydy.
+     */
+    location?: string | null;
+    /**
+     * Open-in-Maps link.
+     */
+    mapUrl?: string | null;
+    description?: string | null;
+    /**
+     * Quick-facts grid (check-in, Wi-Fi, sleeps, nightly rate, …).
+     */
+    basicInfo?:
+      | {
+          label: string;
+          value: string;
+          id?: string | null;
+        }[]
+      | null;
+    /**
+     * Useful links (booking, reviews, house rules).
+     */
+    links?:
+      | {
+          label: string;
+          url: string;
+          id?: string | null;
+        }[]
+      | null;
+    photos?:
+      | {
+          url: string;
+          caption?: string | null;
+          id?: string | null;
+        }[]
+      | null;
+    /**
+     * Free-form bullets (PRD §8.7 basic-info).
+     */
+    goodToKnow?:
+      | {
+          text: string;
+          id?: string | null;
+        }[]
+      | null;
+  };
+  /**
+   * Driving directions per origin (PRD §8.3.4 reference).
+   */
+  directions?:
+    | {
+        /**
+         * From where, e.g. Brno.
+         */
+        origin: string;
+        /**
+         * e.g. 2 h 10 min.
+         */
+        duration?: string | null;
+        /**
+         * e.g. 180 km.
+         */
+        distance?: string | null;
+        /**
+         * Route notes / turn-by-turn.
+         */
+        notes?: string | null;
+        id?: string | null;
+      }[]
+    | null;
+  /**
+   * Parking info at the destination.
+   */
+  parking?: string | null;
+  /**
+   * Public-transport options (PRD §8.3.4).
+   */
+  publicTransport?:
+    | {
+        /**
+         * Line / service, e.g. R 18 Beskydy.
+         */
+        line: string;
+        from?: string | null;
+        to?: string | null;
+        /**
+         * Departure time(s).
+         */
+        departs?: string | null;
+        /**
+         * Arrival time(s).
+         */
+        arrives?: string | null;
+        notes?: string | null;
+        id?: string | null;
+      }[]
+    | null;
+  /**
+   * House / trip notes shown to everyone (PRD §8.7).
+   */
+  notes?: string | null;
   updatedAt: string;
   createdAt: string;
 }
@@ -447,6 +620,10 @@ export interface PayloadLockedDocument {
         value: string | Trip;
       } | null)
     | ({
+        relationTo: 'trip-content';
+        value: string | TripContent;
+      } | null)
+    | ({
         relationTo: 'memberships';
         value: string | Membership;
       } | null)
@@ -465,6 +642,10 @@ export interface PayloadLockedDocument {
     | ({
         relationTo: 'audit-entries';
         value: string | AuditEntry;
+      } | null)
+    | ({
+        relationTo: 'media';
+        value: string | Media;
       } | null);
   globalSlug?: string | null;
   user: {
@@ -558,6 +739,7 @@ export interface TripsSelect<T extends boolean = true> {
     | {
         color?: T;
         icon?: T;
+        coverMedia?: T;
         coverImage?: T;
       };
   enabledAreas?:
@@ -600,9 +782,75 @@ export interface TripsSelect<T extends boolean = true> {
     | {
         openJoinEnabled?: T;
         openJoinAutoAccept?: T;
-        openJoinTokenHash?: T;
+        openJoinToken?: T;
       };
   createdBy?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "trip-content_select".
+ */
+export interface TripContentSelect<T extends boolean = true> {
+  trip?: T;
+  destination?:
+    | T
+    | {
+        name?: T;
+        location?: T;
+        mapUrl?: T;
+        description?: T;
+        basicInfo?:
+          | T
+          | {
+              label?: T;
+              value?: T;
+              id?: T;
+            };
+        links?:
+          | T
+          | {
+              label?: T;
+              url?: T;
+              id?: T;
+            };
+        photos?:
+          | T
+          | {
+              url?: T;
+              caption?: T;
+              id?: T;
+            };
+        goodToKnow?:
+          | T
+          | {
+              text?: T;
+              id?: T;
+            };
+      };
+  directions?:
+    | T
+    | {
+        origin?: T;
+        duration?: T;
+        distance?: T;
+        notes?: T;
+        id?: T;
+      };
+  parking?: T;
+  publicTransport?:
+    | T
+    | {
+        line?: T;
+        from?: T;
+        to?: T;
+        departs?: T;
+        arrives?: T;
+        notes?: T;
+        id?: T;
+      };
+  notes?: T;
   updatedAt?: T;
   createdAt?: T;
 }
@@ -686,6 +934,48 @@ export interface AuditEntriesSelect<T extends boolean = true> {
   metadata?: T;
   updatedAt?: T;
   createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "media_select".
+ */
+export interface MediaSelect<T extends boolean = true> {
+  alt?: T;
+  updatedAt?: T;
+  createdAt?: T;
+  url?: T;
+  thumbnailURL?: T;
+  filename?: T;
+  mimeType?: T;
+  filesize?: T;
+  width?: T;
+  height?: T;
+  focalX?: T;
+  focalY?: T;
+  sizes?:
+    | T
+    | {
+        thumbnail?:
+          | T
+          | {
+              url?: T;
+              width?: T;
+              height?: T;
+              mimeType?: T;
+              filesize?: T;
+              filename?: T;
+            };
+        card?:
+          | T
+          | {
+              url?: T;
+              width?: T;
+              height?: T;
+              mimeType?: T;
+              filesize?: T;
+              filename?: T;
+            };
+      };
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema

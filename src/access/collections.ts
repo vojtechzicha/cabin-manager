@@ -111,6 +111,35 @@ export const invitationsAccess = {
   }) satisfies Access,
 };
 
+// --- Trip content -----------------------------------------------------------
+
+/**
+ * Trip info & content (T-203): every trip member reads it; only organizers
+ * (and admins) edit it. Mirrors the membership read scope and the invitation
+ * write scope (PRD §8.7 — read-mostly content the organizer maintains).
+ */
+export const tripContentAccess = {
+  read: (async ({ req }) => {
+    if (isPlatformAdminReq(req)) return true;
+    if (!userId(req)) return false;
+    return { trip: { in: await memberTripIds(req) } };
+  }) satisfies Access,
+  create: (async ({ req, data }) => {
+    if (isPlatformAdminReq(req)) return true;
+    return isOrganizerOf(req, data?.trip as string | undefined);
+  }) satisfies Access,
+  update: (async ({ req }) => {
+    if (isPlatformAdminReq(req)) return true;
+    if (!userId(req)) return false;
+    return { trip: { in: await organizerTripIds(req) } };
+  }) satisfies Access,
+  delete: (async ({ req }) => {
+    if (isPlatformAdminReq(req)) return true;
+    if (!userId(req)) return false;
+    return { trip: { in: await organizerTripIds(req) } };
+  }) satisfies Access,
+};
+
 // --- Identities -------------------------------------------------------------
 
 /**

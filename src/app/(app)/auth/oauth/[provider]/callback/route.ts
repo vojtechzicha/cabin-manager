@@ -8,7 +8,7 @@ import { fetchProfile, loginWithOAuth } from "@/services/oauth";
 import { issueAuthToken } from "@/services/sessions";
 import type { OAuthProvider } from "@/services/identity";
 
-import { setAuthCookie } from "../../../session";
+import { completeAuth } from "../../../session";
 
 const PROVIDERS = new Set<OAuthProvider>(["google", "microsoft"]);
 
@@ -43,9 +43,9 @@ export async function GET(
     const { identity } = await loginWithOAuth(payload, profile);
     const issued = await issueAuthToken(payload, identity);
 
-    const res = NextResponse.redirect(`${appUrl}/`);
-    setAuthCookie(res, issued);
+    const res = completeAuth(issued, request.cookies.get("oauth_next")?.value);
     res.cookies.delete("oauth_state");
+    res.cookies.delete("oauth_next");
     return res;
   } catch (err) {
     const code2 = isAuthError(err) ? err.code : "error";

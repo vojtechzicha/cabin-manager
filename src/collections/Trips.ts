@@ -35,8 +35,18 @@ export const Trips: CollectionConfig = {
       admin: { description: "Per-trip branding (PRD §8.1, §12)." },
       fields: [
         { name: "color", type: "text", admin: { description: "Accent color, e.g. #3b82f6." } },
-        { name: "icon", type: "text" },
-        { name: "coverImage", type: "text", admin: { description: "Cover/background image URL." } },
+        { name: "icon", type: "text", admin: { description: "Emoji glyph branding the trip." } },
+        {
+          name: "coverMedia",
+          type: "relationship",
+          relationTo: "media",
+          admin: { description: "Uploaded cover photo (stored in MongoDB/GridFS)." },
+        },
+        {
+          name: "coverImage",
+          type: "text",
+          admin: { description: "Optional cover image URL override (used if no upload)." },
+        },
       ],
     },
     {
@@ -166,12 +176,13 @@ export const Trips: CollectionConfig = {
           admin: { description: "Approve open-join requests automatically. Approval is required by default." },
         },
         {
-          name: "openJoinTokenHash",
+          name: "openJoinToken",
           type: "text",
           index: true,
           admin: {
             readOnly: true,
-            description: "SHA-256 of the open-join link token (the raw token is never stored).",
+            description:
+              "The open-join link's shareable token. Unlike auth tokens (magic link / invites) this is stored in the clear, because it's a non-secret, approval-gated link the organizer needs to re-display and share repeatedly.",
           },
         },
       ],

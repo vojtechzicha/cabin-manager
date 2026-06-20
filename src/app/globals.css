@@ -30,7 +30,7 @@
   --accent-ink: #15623f;
   --accent-soft: #e3f3ec;
   --gold: #ffd23f;
-  --photo: radial-gradient(125% 90% at 76% 0%, #8fd9b4 0%, #2f9e73 42%, #18694a 76%, #0e4732 100%);
+  --photo: radial-gradient(120% 95% at 78% 0%, #7cd0a6 0%, #2f9e73 40%, #18694a 76%, #0e4732 100%);
 }
 
 @theme inline {

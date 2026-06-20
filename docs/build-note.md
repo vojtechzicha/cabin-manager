@@ -1,10 +1,10 @@
-# Build Notes — for the engineers picking up Epics 2+
+# Build Notes — for the engineers picking up Epics 3+
 
-This is a working handoff from **Epic 0 (Foundation)** and **Epic 1 (Identity,
-accounts & authentication)** to the people building everything on top of them.
+This is a working handoff from **Epics 0–2** (Foundation, Identity/auth, and
+Lifecycle/Trips/Console) to the people building the feature epics on top.
 Read [`prd.md`](prd.md) for *what* and [`build.md`](build.md) for the ticket
 list; this note is *how the foundation is wired and how to extend it without
-fighting it*.
+fighting it*. **Epic 2 is mapped in §9; its placeholders & debt in §10.**
 
 ---
 
@@ -38,23 +38,29 @@ for the full map. In short:
   human**.
 - Delivery (`src/services/delivery.ts`): localized email **text** + share intents.
 
-**Deliberately NOT done yet (your job):**
+**Done since (Epic 2 — T-201…T-203 + a UI overhaul):** lifecycle guards
+(`domain/lifecycle`, T-202), the organizer console + all the auth UI screens
+(sign-in, approval queue, co-organizer mgmt), trip info content (T-203), the
+Czech **IBAN** half of `payments/` (T-503), media uploads, and a photo-forward
+dashboard. **See §9 for the full map and §10 for what's placeholder / needs
+refactor.**
+
+**Still NOT done yet (your job):**
 
 - Feature collections: polls, expenses, prepayments, rooms/beds, cars, lists,
   reminders.
-- The settlement engine (`domain/finance`, T-501) and lifecycle guards
-  (`domain/lifecycle`, T-202) — directories exist with placeholder `index.ts`.
-- SPAYD QR + IBAN (`payments/`, T-503) — placeholder only.
+- The **settlement engine** (`domain/finance`, T-501) — directory still a
+  placeholder. (Lifecycle guards `domain/lifecycle` are **done**.)
+- **SPAYD QR** generation (`payments/`, T-503 remainder). The account↔IBAN
+  conversion + validation (`payments/iban.ts`) **is done and tested**.
+- The **organizer assistant** (open-loop dashboard + nudges, Epic 7). Epic 2
+  built the *participant-style* dashboard, not the prototype's assistant console.
 - **Email HTML templates + a real provider (T-105 remainder).** Epic 1 ships the
   adapter *interface* and the **localized template text** (subjects/bodies, CS+EN,
   recipient-language). What's missing: branded **HTML** bodies (the `EmailMessage.html`
   field is unused) and a real provider — currently a `LoggingEmailAdapter` prints
   the email (incl. magic/invite URLs) to the dev console. Swap via
   `setEmailAdapter(...)`; natural to do alongside reminders (T-702).
-- **Auth UI screens.** The auth *backend* + routes exist, but there is no sign-in
-  page, no organizer "approval queue" view, no co-organizer management UI — those
-  belong to the organizer console (T-201, Epic 2). Today you drive auth via the
-  routes/services directly (see §8).
 
 The **`archive/`** folder holds the original clickable prototype (feature
 screens for dashboard/plan/stay/money/info/organize + the mock `trips.ts` data
@@ -246,18 +252,27 @@ both.
 
 ## 7. Recommended next steps (build order from build.md)
 
-Epic 1 is done. The next slice is **Epic 2 (lifecycle & trips)** and the
-**finance engine**, both of which everything money/state depends on:
+Epics 0, 1, and **2 are done** (see §9 for Epic 2). The next slices:
 
-1. **T-201** trip creation & organizer console shell — the first real frontend.
-   Reuse `createTrip` (`services/trips.ts`) and the auth/membership model; build
-   the sign-in screen + approval-queue UI that Epic 1 deliberately left out.
-2. **T-202** lifecycle guards (`domain/lifecycle`) — pure transition tables for
-   trip phase + per-area states; the `Trip` already persists those state fields.
-3. **T-501** settlement engine (`domain/finance`) and **T-503** SPAYD/IBAN
-   (`payments/`) — pure, test-first, before any finance UI.
-4. Then the feature epics (voting, planning, lists, assistant), reusing the
-   design system, i18n, audit helper, and the access predicates from §8.
+1. **Epic 3 — Ideation / voting (T-301…T-305).** The first feature epic on top
+   of the console: `Poll`/`PollOption`/`Vote` collections (votes public), the
+   voting UI, participant-suggested options, the **optimal-date algorithm**
+   (`domain/scheduling`, pure/test-first), and close-poll → promote-winner (uses
+   the §9 lifecycle service + `transitionArea(..., "datePoll", "closed")`). When
+   the date poll closes, write `trip.dates` — the dashboard countdown/stat card
+   already reads it.
+2. **Finance engine first (T-501).** `domain/finance` settlement engine — pure,
+   exhaustively unit-tested, before any finance UI. The **lifecycle ledger
+   write-guard already exists** (`assertLedgerWritable`, `domain/lifecycle`) and
+   just needs wiring into the finance collections' `beforeChange` hook (T-502).
+   `payments/iban.ts` is done; **SPAYD QR is still T-503's remaining half.**
+3. Then planning (T-401…T-404), lists (T-601/2), and the **organizer assistant
+   (Epic 7)** — the open-loop/nudge console the prototype shows but Epic 2 did
+   **not** build (see §10).
+
+Reuse everywhere: the design system, i18n, audit helper, access predicates (§8),
+the lifecycle service (§9), and the dashboard stat-card pattern (light up the
+"set up later" placeholders as each epic lands).
 
 ---
 
@@ -316,6 +331,126 @@ Auth state isn't shown in the landing UI yet — verify a session with
 - **Email HTML templates + real provider** — see §1. Text templates exist
   (CS+EN, recipient-localized); HTML + provider are deferred. The dev adapter
   logs the full email body so magic/invite URLs are visible during manual testing.
-- **All auth UI** (sign-in, approval queue, co-organizer management) → T-201.
+- **All auth UI** (sign-in, approval queue, co-organizer management) → done in
+  Epic 2 (§9).
 - OAuth `preferredLanguage` is defaulted to `cs`, not read from the provider's
   locale claim (small future enhancement in `loginWithOAuth`).
+
+---
+
+## 9. Epic 2 (lifecycle, trips, console + UI overhaul) — what exists now
+
+The whole organizer/participant frontend is built on the Epic 1 backbone. Sign in
+as the organizer (`organizer@chata.test`, magic link printed to `pnpm dev`) — the
+platform admin is back-office only and isn't a trip member, so its frontend trip
+list is intentionally empty.
+
+### Domain & services (the state/money seam)
+- **`domain/lifecycle`** (pure, 24 unit tests) — the T-202 state machine: phase
+  transitions (forward-any, one-step-back reversal), per-area graphs (poll
+  open→closed, roster open→locked, **finance open→settling→closed, never
+  skipping settling**), the cross-area invariant *can't settle a date that isn't
+  chosen*, and the ledger write-guard `assertLedgerWritable` (Open-only).
+- **`services/lifecycle.ts`** — `transitionPhase` / `transitionArea` enforce the
+  guards, write audit entries (dedicated `FinanceAccountsClosed/Reopened` keys),
+  and expose `legalPhaseTransitions` / `legalAreaTransitions` for the UI (the app
+  layer can't import `domain`, so legal-move listing is surfaced here).
+- **`services/trips.ts`** (extended) — `updateTripConfig`, `listMemberTrips`,
+  `listMemberships`, `getMembership`, `identityOrganizesTrip`, `setMembershipRole`,
+  `setBanker` (moves the `isBanker` flag + stores account/IBAN on `trip.banker`).
+- **`services/trip-content.ts`** — `getTripContent` / `upsertTripContent` (one
+  `trip-content` row per trip, idempotent).
+- **`services/banking.ts`** — thin re-export of the pure `payments/iban.ts`
+  (`czAccountToIban`/`ibanToCzAccount`/validators) so server actions can use it.
+- **`payments/iban.ts`** (pure, 21 unit tests) — Czech account↔IBAN + mod-11
+  account checksum + mod-97 IBAN validation. SPAYD QR is **not** here yet.
+
+### Collections (`src/collections/`)
+- **`TripContent`** (slug `trip-content`) — destination (name/location/mapUrl/
+  description/basicInfo[]/goodToKnow[]), directions[], parking, publicTransport[],
+  notes. Member-read, organizer-write (`tripContentAccess`).
+- **`Media`** — image uploads, **`disableLocalStorage:true`**; bytes live in
+  **MongoDB/GridFS** via `src/storage/gridfs.ts` + `@payloadcms/plugin-cloud-storage`
+  (wired in `payload.config.ts`). Served at `/api/media/file/<name>`. Public read,
+  authenticated write. `Trip.theme.coverMedia` references it.
+
+### Frontend (`src/app/(app)/`)
+- **Auth UI**: `sign-in/` (magic-link + OAuth), `auth/actions.ts` (`signOutAction`,
+  a Server Action — sign-out must not be a `<Link>` or the router cache shows the
+  stale authed page), `auth/current-user.ts` (`getCurrentIdentity`/`requireIdentity`),
+  and `components/PostLoginRefresh` (see the OAuth note below).
+- **Home** (`page.tsx`): guest landing vs membership-scoped trip picker.
+- **Console** (`trips/[tripId]/`): `layout.tsx` authorizes membership + themes the
+  subtree (cover photo → CSS vars), reusing `AppShell` with `slug="trips/<id>"`.
+  `page.tsx` is the **photo dashboard** (Hero/countdown/crowd + `PhaseBar` +
+  stat cards). `settings/`, `people/`, `info/` (+ `info/edit/`) are the
+  organizer surfaces. `trips/new/` is the create flow.
+- **Server actions** (`trips/actions.ts`): create/config (multipart — cover file
+  uploaded to GridFS via `handleCover`), lifecycle transitions, banker (auto-IBAN
+  + validation), invites/approval/roles/open-join, info save (structured JSON).
+  Form result shape in `trips/form-state.ts` (`useActionState`).
+- **Components**: `BrandingFields` (cover upload + emoji icon + accent, live
+  preview), `RepeatableRows` (structured info editor), `CopyField` (open-join
+  link), `InviteForm`, `SignInForm`, and co-located `PhaseBar` (the interactive
+  phase stepper + area-lock chips). Client forms that call server actions live
+  **under `app/`**, not `components/` (boundary: `components → app` is forbidden).
+
+### Two things to know
+- **GridFS storage**: chosen over local disk so uploads survive redeploys / work
+  across instances with no extra service. `mongodb` is a direct runtime dep.
+  Verify with `pnpm payload run scripts/verify-media.ts`.
+- **OAuth cross-site cookie workaround**: the magic-link flow lands authed
+  immediately, but the OAuth callback's `SameSite=Lax` cookie isn't sent on the
+  *first* `/` request after the cross-site redirect, so the login routes redirect
+  to `/?signedin=1` and `PostLoginRefresh` does one `router.refresh()` to pick up
+  the cookie. Works, but it's a workaround (see §10).
+
+---
+
+## 10. Placeholders, known gaps & refactor candidates
+
+Honest debt so the next epic doesn't trip on it:
+
+- **Dashboard stat cards are placeholders.** `Beds / Money / Lists / Deposit`
+  render muted "set up later" cards, gated by `enabledAreas`. Wire them to real
+  data as Epic 4 (sleeping), Epic 5 (finance), Epic 6 (lists) land — the grid
+  pattern is in `trips/[tripId]/page.tsx`.
+- **No organizer assistant.** The prototype's open-loop + nudge console
+  (`archive/prototype/.../organize/page.tsx`) is Epic 7; Epic 2 ships the
+  participant-style dashboard instead.
+- **Finance not started.** `domain/finance` (T-501) and SPAYD QR (T-503 half) are
+  not built. The ledger write-guard exists but **isn't wired** into any
+  `beforeChange` hook yet (no finance collections to attach it to — T-502).
+- **Email** still the `LoggingEmailAdapter` (carry-over §1/§8).
+- **Banker has two account fields — don't conflate.** `trip.banker.{bankAccount,
+  iban}` is the banker's *receiving* account (set in Settings). `membership.
+  {bankAccount,iban}` is each participant's *refund* account (T-404/T-506,
+  unused UI yet). `setBanker` flips `isBanker` in a per-member loop (N updates,
+  not a single batch) — fine for typical trips.
+- **Deposit config is shallow.** The "deposit" area toggle doubles as
+  `deposit.enabled`; gating/basis/cap (T-404) aren't surfaced.
+- **Info "getting there" is reference-only.** Directions/parking/public-transport
+  are editable; participant **rides (cars/seats)** are T-403, not built.
+  `RepeatableRows` has no row reorder / per-field validation, and the 5-column
+  public-transport editor wraps tightly on mobile.
+- **Images aren't optimized.** Served through the app (no CDN); `Hero`/cover use
+  CSS `background-image` (not `next/image`); `imageSizes` are generated but a tiny
+  source may skip them. `Trip.theme.coverImage` (text URL) is kept as a redundant
+  fallback beside `coverMedia`.
+- **Hero countdown wart**: with no `trip.dates`, the chip shows `0` + "Not set
+  yet". Cosmetic; will be moot once the date poll writes `trip.dates` (Epic 3).
+- **Perf not tuned.** The console layout *and* the dashboard each refetch the
+  trip + memberships + `listMemberTrips` per request (N queries, no caching). PRD
+  §10 wants efficiency at 100+ trips — revisit with caching/`use cache` later.
+- **Admin-on-frontend edge.** Per the agreed decision the frontend is
+  membership-scoped (admins use their organizer login). The trip `layout` still
+  admits `role:admin` to *view* any trip, but People/Settings gate on
+  `identityOrganizesTrip` (admin isn't auto-organizer) — a mild inconsistency if
+  an admin opens a trip they don't organize.
+- **Validation messages** are returned as codes and localized client-side (the
+  server actions don't localize). Fine, just not symmetric with email i18n.
+- **No UI tests in CI.** Domain/services/integration are covered; the form/
+  picker/dashboard flows are validated by **manual Playwright** only — consider
+  promoting those into `tests/` specs.
+- **Multi-domain routing** (custom per-trip domains, PRD §8.1) is not done;
+  routing is by trip id (`/trips/<id>`).

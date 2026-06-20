@@ -25,10 +25,24 @@ export async function GET(
 
   try {
     const state = generateToken().raw;
+    const requestedNext = request.nextUrl.searchParams.get("next");
+    const next =
+      requestedNext?.startsWith("/") &&
+      !requestedNext.startsWith("//") &&
+      !requestedNext.includes("\\")
+        ? requestedNext
+        : "/";
     const redirectUri = `${appUrl}/auth/oauth/${provider}/callback`;
     const authorizeUrl = buildAuthorizeUrl(provider as OAuthProvider, { redirectUri, state });
     const res = NextResponse.redirect(authorizeUrl);
     res.cookies.set("oauth_state", state, {
+      httpOnly: true,
+      path: "/",
+      sameSite: "lax",
+      secure: getEnv().NODE_ENV === "production",
+      maxAge: 600,
+    });
+    res.cookies.set("oauth_next", next, {
       httpOnly: true,
       path: "/",
       sameSite: "lax",

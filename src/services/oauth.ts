@@ -85,6 +85,40 @@ export interface OAuthProfile {
   name?: string;
 }
 
+/** OIDC-ish claims we read for the display name, from either source. */
+interface NameClaims {
+  name?: unknown;
+  given_name?: unknown;
+  family_name?: unknown;
+}
+
+/**
+ * Decode an OIDC `id_token`'s payload (no signature check needed — it came
+ * directly from the provider's token endpoint over TLS). Microsoft's userinfo
+ * endpoint often omits `name`, but the id_token reliably carries it.
+ */
+function decodeIdTokenClaims(idToken?: string): Record<string, unknown> {
+  const payload = idToken?.split(".")[1];
+  if (!payload) return {};
+  try {
+    const json = Buffer.from(payload.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8");
+    return JSON.parse(json) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+const asString = (v: unknown): string | undefined =>
+  typeof v === "string" && v.trim().length > 0 ? v.trim() : undefined;
+
+/** Best display name from a claims source: `name`, else given + family. */
+function fullName(claims: NameClaims): string | undefined {
+  const name = asString(claims.name);
+  if (name) return name;
+  const parts = [asString(claims.given_name), asString(claims.family_name)].filter(Boolean);
+  return parts.length ? parts.join(" ") : undefined;
+}
+
 /** Exchange an authorization code for an access token, then fetch the profile. */
 export async function fetchProfile(
   provider: OAuthProvider,
@@ -106,8 +140,10 @@ export async function fetchProfile(
     }),
   });
   if (!tokenRes.ok) throw new AuthError("invalid_token", `Token exchange failed (${tokenRes.status})`);
-  const tokenJson = (await tokenRes.json()) as { access_token?: string };
+  const tokenJson = (await tokenRes.json()) as { access_token?: string; id_token?: string };
   if (!tokenJson.access_token) throw new AuthError("invalid_token", "No access token returned");
+  // The id_token carries richer profile claims than Microsoft's userinfo does.
+  const idClaims = decodeIdTokenClaims(tokenJson.id_token);
 
   const infoRes = await fetch(userInfoUrl, {
     headers: { authorization: `Bearer ${tokenJson.access_token}` },
@@ -119,17 +155,24 @@ export async function fetchProfile(
     email?: string;
     email_verified?: boolean | string;
     name?: string;
+    given_name?: string;
+    family_name?: string;
   };
-  const email = info.email;
+
+  const email = asString(info.email) ?? asString(idClaims.email);
   if (!email) throw new AuthError("invalid_token", "OAuth profile has no email");
+  const verified = (v: unknown) => v === true || v === "true";
 
   return {
     provider,
-    providerAccountId: info.sub ?? info.oid ?? email,
+    providerAccountId:
+      asString(info.sub) ?? asString(info.oid) ?? asString(idClaims.sub) ?? asString(idClaims.oid) ?? email,
     email,
     // Google returns a boolean; Microsoft's verified emails come through Graph.
-    emailVerified: info.email_verified === true || info.email_verified === "true" || provider === "microsoft",
-    name: info.name,
+    emailVerified:
+      verified(info.email_verified) || verified(idClaims.email_verified) || provider === "microsoft",
+    // Prefer userinfo's name, then the id_token's (Microsoft omits it from userinfo).
+    name: fullName(info) ?? fullName(idClaims),
   };
 }
 
@@ -161,12 +204,27 @@ export async function loginWithOAuth(
     { email: profile.email, displayName: profile.name },
     req,
   );
-  const linked = await linkProvider(
+  let linked = await linkProvider(
     payload,
     identity,
     { provider: profile.provider, providerAccountId: profile.providerAccountId, email: profile.email },
     req,
   );
+
+  // Backfill a missing display name on an existing Identity — e.g. one first
+  // provisioned by magic link, or by a provider (Microsoft) that didn't return
+  // a name on the original login. This self-heals accounts that show only an
+  // email in the UI.
+  if (!linked.displayName && profile.name) {
+    linked = await payload.update({
+      collection: "identities",
+      id: linked.id,
+      overrideAccess: true,
+      req,
+      data: { displayName: profile.name },
+    });
+  }
+
   const activatedMemberships = await resolvePendingInvitesForEmail(payload, linked, req);
   return { identity: linked, created, activatedMemberships };
 }

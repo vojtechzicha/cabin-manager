@@ -33,11 +33,15 @@ export async function ensureCollections(payload: Payload): Promise<void> {
   for (const slug of [
     "identities",
     "trips",
+    "trip-content",
     "memberships",
     "invitations",
     "login-tokens",
     "health-checks",
     "audit-entries",
+    "media",
+    "media.files",
+    "media.chunks",
   ]) {
     if (!existing.has(slug)) {
       const col = db.collection(slug);

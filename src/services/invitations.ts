@@ -172,6 +172,12 @@ export interface RedeemResult {
  *
  * For a non-email invite (phone/handle/name) the redeemer must already be signed
  * in — pass their `identity`, since we have no verified email to provision from.
+ *
+ * For an email invite, a passed-in `identity` (i.e. someone already signed in)
+ * must match the invited address: redeeming while logged in as a *different*
+ * account is refused (`wrong_account`) rather than silently claiming the
+ * invitee's membership. The invite is left untouched so the right person can
+ * still use it.
  */
 export async function redeemInvitation(
   payload: Payload,
@@ -203,19 +209,27 @@ export async function redeemInvitation(
     throw new AuthError("expired_token");
   }
 
+  // Resolve the redeeming Identity, enforcing that the invite reaches its
+  // intended recipient. An email invite names a specific address, so a signed-in
+  // user may redeem it only when it's addressed to *their own* email — otherwise
+  // someone logged in as a different account would silently claim the invitee's
+  // pending membership. With nobody signed in, possession of the emailed token
+  // stands in for control of that mailbox, so we provision the Identity from it.
   let identity = opts.identity ?? null;
   let created = false;
-  if (!identity) {
-    if (invitation.targetType !== "email") {
-      throw new AuthError("invalid_token", "Non-email invite requires an authenticated identity");
+  if (invitation.targetType === "email") {
+    const target = normalizeEmail(invitation.targetValue);
+    if (identity) {
+      if (normalizeEmail(identity.email) !== target) throw new AuthError("wrong_account");
+    } else {
+      const ensured = await ensureIdentity(payload, { email: target, displayName: undefined }, req);
+      identity = ensured.identity;
+      created = ensured.created;
     }
-    const ensured = await ensureIdentity(
-      payload,
-      { email: invitation.targetValue, displayName: undefined },
-      req,
-    );
-    identity = ensured.identity;
-    created = ensured.created;
+  } else if (!identity) {
+    // Non-email invite (phone/handle/name): no verified email to provision from,
+    // so the redeemer must already be signed in and claims it as themselves.
+    throw new AuthError("invalid_token", "Non-email invite requires an authenticated identity");
   }
 
   const membershipId = relId(invitation.membership);
@@ -295,8 +309,10 @@ export interface OpenJoinResult {
 
 /**
  * Enable (or rotate) a trip's open-join link. Approval is required by default;
- * pass `autoAccept` to skip the queue (PRD §5, resolved decision #5). Returns
- * the raw link token (the hash is stored on the trip).
+ * pass `autoAccept` to skip the queue (PRD §5, resolved decision #5). The token
+ * is stored in the clear (see `Trips.openJoinToken`) so the organizer can
+ * re-display and share the link; re-calling this rotates it, invalidating the
+ * previous link.
  */
 export async function enableOpenJoin(
   payload: Payload,
@@ -304,7 +320,7 @@ export async function enableOpenJoin(
   opts: { autoAccept?: boolean } = {},
   req?: PayloadRequest,
 ): Promise<OpenJoinResult> {
-  const { raw, hash } = generateToken();
+  const { raw } = generateToken();
   await payload.update({
     collection: "trips",
     id: tripId,
@@ -314,7 +330,7 @@ export async function enableOpenJoin(
       invites: {
         openJoinEnabled: true,
         openJoinAutoAccept: opts.autoAccept ?? false,
-        openJoinTokenHash: hash,
+        openJoinToken: raw,
       },
     },
   });
@@ -333,7 +349,7 @@ export async function disableOpenJoin(
     overrideAccess: true,
     req,
     data: {
-      invites: { openJoinEnabled: false, openJoinAutoAccept: false, openJoinTokenHash: null },
+      invites: { openJoinEnabled: false, openJoinAutoAccept: false, openJoinToken: null },
     },
   });
 }
@@ -360,7 +376,7 @@ export async function requestOpenJoin(
     collection: "trips",
     limit: 1,
     overrideAccess: true,
-    where: { "invites.openJoinTokenHash": { equals: hashToken(rawToken) } },
+    where: { "invites.openJoinToken": { equals: rawToken } },
     req,
   });
   const trip = res.docs[0];

@@ -14,6 +14,7 @@ import { AuditAction, auditEntriesForTrip, recordAudit } from "@/services/audit"
 import { ensureIdentity } from "@/services/identity";
 import { createTrip } from "@/services/trips";
 import { createDirectInvite } from "@/services/invitations";
+import { upsertTripContent } from "@/services/trip-content";
 
 const ADMIN_EMAIL = "admin@chata.test";
 const ADMIN_PASSWORD = "chata-admin-123";
@@ -50,11 +51,15 @@ const existingNamespaces = new Set(
 for (const slug of [
   "identities",
   "trips",
+  "trip-content",
   "memberships",
   "invitations",
   "login-tokens",
   "health-checks",
   "audit-entries",
+  "media",
+  "media.files",
+  "media.chunks",
 ]) {
   if (!existingNamespaces.has(slug)) {
     await warmupDb.collection(slug).insertOne({ __warmup: true });
@@ -138,6 +143,34 @@ if (existingTrip.docs.length === 0) {
     targetType: "email",
     targetValue: INVITEE_EMAIL,
     displayName: "Petr (invited)",
+  });
+
+  await upsertTripContent(payload, String(trip.id), {
+    destination: {
+      name: "Chata Pod Lysou",
+      location: "Krásná 142 · Beskydy",
+      mapUrl: "https://maps.example/chata-pod-lysou",
+      description: "A timber cabin under Lysá hora — sauna, big kitchen, sleeps eleven.",
+      basicInfo: [
+        { label: "Check-in", value: "15:00 Thu" },
+        { label: "Wi-Fi", value: "Yes · 50 Mb" },
+        { label: "Sleeps", value: "11 people" },
+        { label: "Nightly", value: "4 200 Kč" },
+      ],
+      goodToKnow: [
+        { text: "Firewood & sauna included" },
+        { text: "Bring indoor slippers" },
+        { text: "No pets · quiet after 22:00" },
+      ],
+    },
+    directions: [
+      { origin: "Brno", duration: "2 h 10 min", distance: "180 km", notes: "D1 → Frýdek-Místek → Krásná." },
+    ],
+    parking: "Free parking for 4 cars in the yard.",
+    publicTransport: [
+      { line: "R 18 Beskydy", from: "Praha", to: "Frýdlant n. O.", departs: "08:11", arrives: "12:34" },
+    ],
+    notes: "Trash goes out Sunday morning. Leave the cabin as you found it.",
   });
 
   payload.logger.info(`created demo trip "${trip.name}" organized by ${ORGANIZER_EMAIL}`);

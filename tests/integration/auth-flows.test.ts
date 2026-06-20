@@ -108,6 +108,55 @@ describe("direct invitations (T-104)", () => {
 
     await expect(redeemInvitation(payload, token)).rejects.toMatchObject({ code: "used_token" });
   });
+
+  it("lets a signed-in user redeem an email invite addressed to their own email", async () => {
+    const organizer = (await createTestUser(payload)) as Identity;
+    const { trip } = await createTrip(payload, { name: "Self", shortName: "SE" }, organizer);
+    const inviteeEmail = email("self-invitee");
+    const { token } = await createDirectInvite(payload, {
+      tripId: String(trip.id),
+      targetType: "email",
+      targetValue: inviteeEmail,
+    });
+
+    // The invitee already has an account and is signed in when they click.
+    const invitee = (await ensureIdentity(payload, { email: inviteeEmail })).identity;
+    const redeemed = await redeemInvitation(payload, token, { identity: invitee });
+    expect(redeemed.created).toBe(false);
+    expect(redeemed.membership.status).toBe("active");
+    expect(String(redeemed.identity.id)).toBe(String(invitee.id));
+  });
+
+  it("refuses an email invite when signed in as a different user, leaving it usable", async () => {
+    const organizer = (await createTestUser(payload)) as Identity;
+    const { trip } = await createTrip(payload, { name: "Mismatch", shortName: "MM" }, organizer);
+    const inviteeEmail = email("intended");
+    const { token, membership } = await createDirectInvite(payload, {
+      tripId: String(trip.id),
+      targetType: "email",
+      targetValue: inviteeEmail,
+    });
+
+    // A bystander signed in as someone else clicks the invite link.
+    const bystander = (await ensureIdentity(payload, { email: email("bystander") })).identity;
+    await expect(
+      redeemInvitation(payload, token, { identity: bystander }),
+    ).rejects.toMatchObject({ code: "wrong_account" });
+
+    // The pending membership was not hijacked and the invite still works for the
+    // intended recipient afterwards.
+    const stillPending = await payload.findByID({
+      collection: "memberships",
+      id: membership.id,
+      overrideAccess: true,
+    });
+    expect(stillPending.status).toBe("pending");
+    expect(stillPending.identity ?? null).toBeNull();
+
+    const redeemed = await redeemInvitation(payload, token);
+    expect(redeemed.identity.email).toBe(inviteeEmail);
+    expect(redeemed.membership.status).toBe("active");
+  });
 });
 
 describe("open-join with approval (T-104)", () => {
@@ -173,5 +222,16 @@ describe("OAuth login (T-102)", () => {
   it("refuses an unverified OAuth email", async () => {
     const bad = { ...profile("google", email("unverified")), emailVerified: false };
     await expect(loginWithOAuth(payload, bad)).rejects.toMatchObject({ code: "invalid_token" });
+  });
+
+  it("backfills a missing display name on a later login that supplies one", async () => {
+    const addr = email("oauth-noname");
+    // First login with no name (e.g. Microsoft userinfo omitting it) → email-only.
+    const first = await loginWithOAuth(payload, { ...profile("microsoft", addr), name: undefined });
+    expect(first.identity.displayName).toBeFalsy();
+    // A later login that does carry a name fills it in (self-heal).
+    const second = await loginWithOAuth(payload, { ...profile("google", addr), name: "Vojtěch Zicha" });
+    expect(String(second.identity.id)).toBe(String(first.identity.id));
+    expect(second.identity.displayName).toBe("Vojtěch Zicha");
   });
 });

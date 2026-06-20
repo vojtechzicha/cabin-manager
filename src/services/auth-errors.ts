@@ -8,6 +8,7 @@ export type AuthErrorCode =
   | "used_token"
   | "open_join_disabled"
   | "already_member"
+  | "wrong_account"
   | "not_found";
 
 export class AuthError extends Error {

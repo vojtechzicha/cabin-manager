@@ -5,7 +5,10 @@ collaborative, mobile-first, multilingual app. See [`docs/prd.md`](docs/prd.md)
 for the product spec and [`docs/build.md`](docs/build.md) for the engineering
 tickets.
 
-This repository currently implements **Epic 0 — Foundation & architecture**.
+This repository currently implements **Epics 0–2** — Foundation, Identity &
+auth, and Lifecycle / Trips / Organizer console (see
+[`docs/build-note.md`](docs/build-note.md) §9–§10 for the Epic 2 map, placeholders,
+and tech-debt).
 
 ## Stack
 
