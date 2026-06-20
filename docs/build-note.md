@@ -454,3 +454,50 @@ Honest debt so the next epic doesn't trip on it:
   promoting those into `tests/` specs.
 - **Multi-domain routing** (custom per-trip domains, PRD §8.1) is not done;
   routing is by trip id (`/trips/<id>`).
+
+---
+
+## 11. Design-sync pass — lobby, sign-in & dashboard (Claude Design refresh)
+
+Re-matched the app to the updated **Claude Design** project (`claude.ai/design`,
+files: *Chata Design System / Lobby / Sign In / Screens*), synced via the
+`claude_design` MCP. Token authority is the Design System file; the *Screens*
+hero gradients are per-mockup variants and were intentionally **not** copied.
+
+What changed:
+- **Design tokens** (`globals.css`): warm-neutral spine corrected to the canonical
+  values — `--paper #f3f2ee`, `--card #fffefb`, `--line #e7e4dd` (+ `themeColor`).
+  Primary `Button` gained the kit's accent drop-shadow (`ui/primitives.tsx`).
+- **Root lobby** (`(app)/page.tsx`) is now the **dark** lobby (trip screens stay
+  bright). Signed-out: photo-forward hero, gradient-text headline, CTAs (desktop
+  inline + mobile bottom-pinned), feature dots, tilted trip-card cluster. Signed-in:
+  "Welcome back, {name}" + "{n} trips in motion", 3-col **Your chatas** grid
+  (phase pill, days badge, name, dates·location), **Past** chips (archived trips),
+  dashed "Start a new chata", and a first-run **empty state**.
+- **Sign-in** (`sign-in/page.tsx` + `components/SignInForm.tsx`): dark "door" —
+  desktop brand panel + glass card, mobile headline + bare form. Magic-link field,
+  Google/Microsoft buttons, and a real **"Check your inbox"** state with a 45s
+  resend cooldown + "use a different email". Auth still runs through the existing
+  Epic 1 magic-link / OAuth routes.
+- **LanguageSwitcher**: one control everywhere — the design's `🌐 EN ▾` globe.
+  Dropdown on desktop, **bottom sheet** (flag rows) on mobile; `tone="light|dark"`
+  only adapts colour to the surface. Locale metadata added in `i18n/config.ts`
+  (`localeFlag`, `localeEnglishLabel`).
+- **Trip dashboard** (`trips/[tripId]/page.tsx`): reordered to the design's
+  stats → **Trip pulse** flow. Trip pulse is a **real** feed from the audit log
+  (lifecycle/finance events, localized, actor-attributed). Removed the redundant
+  in-content Info/People/Settings card (nav lives in the shell); the organizer
+  lifecycle bar now sits below the consumer content (organizers only).
+- **i18n**: new `lobby` and `pulse` groups, expanded `auth`/`home`/`common`; both
+  catalogs kept in sync (the i18n test enforces it).
+
+Deliberately **not** built (design shows them, features don't exist yet):
+- **Pending-invites inbox** ("X invited you → Accept/Decline") — the lobby's
+  headline element. Needs an invitations-addressed-to-me query + accept/decline
+  actions. Smallest remaining design gap; build it before the rest of Epic 1 UI.
+- Trip-card **status pills** ("Deposit due", "Lottery open"), **progress %**, and
+  **avatar stacks** are finance/booking/roster-derived — used the real **phase**
+  as the honest pill, omitted the rest rather than fake data.
+- Empty-state **"Paste invite link"** box and the desktop lobby **search** field.
+- Dashboard's **"Next up"** CTA, balances/QR-settle, bed grids — Epics 4/5 (the
+  stat grid still shows muted "set up later" cards, see §10).

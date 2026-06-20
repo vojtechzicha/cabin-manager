@@ -21,6 +21,18 @@ export const localeLabel: Record<Locale, string> = {
   en: "English",
 };
 
+/** English exonym, shown as a subtitle in the mobile language sheet. */
+export const localeEnglishLabel: Record<Locale, string> = {
+  cs: "Czech",
+  en: "English",
+};
+
+/** Flag emoji per locale, for the mobile language sheet. */
+export const localeFlag: Record<Locale, string> = {
+  cs: "🇨🇿",
+  en: "🇬🇧",
+};
+
 export function isLocale(value: unknown): value is Locale {
   return typeof value === "string" && (locales as readonly string[]).includes(value);
 }

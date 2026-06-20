@@ -34,7 +34,8 @@ export function Sheet({ children, className = "" }: { children: ReactNode; class
 type ButtonVariant = "primary" | "secondary" | "ghost";
 
 const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
-  primary: "bg-accent text-white",
+  // Primary carries the canonical accent drop-shadow from the Design System kit (§07).
+  primary: "bg-accent text-white shadow-[0_8px_18px_-8px_var(--accent)]",
   secondary: "border border-line bg-card text-ink",
   ghost: "text-accent-ink",
 };

@@ -8,10 +8,10 @@
 */
 
 :root {
-  /* warm neutral spine */
-  --paper: #f4efe7;
-  --card: #fffdf9;
-  --line: #e8e1d4;
+  /* warm neutral spine — canonical values from the Chata Design System §03 Color */
+  --paper: #f3f2ee;
+  --card: #fffefb;
+  --line: #e7e4dd;
   --sand: #b7aa97;
   --muted: #756f64;
   --ink: #1c1b18;
