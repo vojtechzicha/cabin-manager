@@ -1,5 +1,7 @@
 import type { CollectionConfig } from "payload";
 
+import { auditReadAccess } from "@/access";
+
 /**
  * Append-only audit trail for sensitive actions — finance, deposits, and
  * lifecycle transitions (PRD §10, build.md T-005). Entries are written only
@@ -15,10 +17,10 @@ export const AuditEntries: CollectionConfig = {
     defaultColumns: ["action", "targetType", "trip", "createdAt"],
   },
   access: {
-    // Reads are tightened to admins + trip members in T-106. Writes are
+    // Reads are tightened to admins + trip members (T-106). Writes are
     // system-only: the helper uses the Local API (overrideAccess), while these
     // false values block any create/update/delete over REST/GraphQL.
-    read: () => true,
+    read: auditReadAccess,
     create: () => false,
     update: () => false,
     delete: () => false,
@@ -44,7 +46,7 @@ export const AuditEntries: CollectionConfig = {
     {
       name: "actor",
       type: "relationship",
-      relationTo: "users",
+      relationTo: "identities",
       required: false,
       admin: { description: "Who performed the action (null for system actions)." },
     },
@@ -61,7 +63,12 @@ export const AuditEntries: CollectionConfig = {
       name: "trip",
       type: "text",
       index: true,
-      admin: { description: "Trip id the entry belongs to (queryable). Becomes a relationship in T-101." },
+      admin: {
+        description:
+          "Trip id the entry belongs to (queryable). Kept as a plain id, not a " +
+          "relationship, so the audit trail stays valid even if a trip is later " +
+          "removed — an audit log must not lose entries to referential cleanup.",
+      },
     },
     { name: "metadata", type: "json" },
   ],

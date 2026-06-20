@@ -32,6 +32,15 @@ export const cs = {
     offerRide: "Ahoj {name}, nabídni nebo si zajisti odvoz na výlet „{trip}“.",
     payUp: "Ahoj {name}, na výletu „{trip}“ ti zbývá doplatit {amount}.",
   },
+  invite: {
+    subject: "Pozvánka na výlet „{trip}“",
+    body: "Ahoj {name}, {organizer} tě zve na výlet „{trip}“. Připoj se tímto odkazem:",
+    shareText: "Pojď s námi na „{trip}“! Připoj se tady:",
+  },
+  magicLink: {
+    subject: "Přihlášení do aplikace Chata",
+    body: "Ahoj, přihlas se do Chaty tímto odkazem. Platí {minutes} minut:",
+  },
   gallery: {
     title: "Designový systém",
     subtitle: "Komponenty, stavy a barvy sdílené napříč aplikací.",

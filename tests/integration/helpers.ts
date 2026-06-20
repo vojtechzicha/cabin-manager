@@ -30,7 +30,15 @@ function nativeDb(payload: Payload): NativeDb {
 export async function ensureCollections(payload: Payload): Promise<void> {
   const db = nativeDb(payload);
   const existing = new Set((await db.listCollections().toArray()).map((c) => c.name));
-  for (const slug of ["users", "health-checks", "audit-entries"]) {
+  for (const slug of [
+    "identities",
+    "trips",
+    "memberships",
+    "invitations",
+    "login-tokens",
+    "health-checks",
+    "audit-entries",
+  ]) {
     if (!existing.has(slug)) {
       const col = db.collection(slug);
       await col.insertOne({ __warmup: true });
@@ -46,20 +54,29 @@ export async function clearCollection(payload: Payload, slug: string): Promise<v
 
 let userCounter = 0;
 
-/** Create a test account. Defaults to a unique email and the participant role. */
+/**
+ * Create a test Identity. Defaults to a unique email and the participant role.
+ * (Named `createTestUser` for continuity with Epic 0 tests; the auth collection
+ * is now `identities`.)
+ */
 export async function createTestUser(
   payload: Payload,
-  overrides: { email?: string; password?: string; name?: string; role?: "admin" | "user" } = {},
+  overrides: {
+    email?: string;
+    password?: string;
+    name?: string;
+    role?: "admin" | "user";
+  } = {},
 ) {
   userCounter += 1;
   const email = overrides.email ?? `user-${userCounter}-${Date.now()}@chata.test`;
   return payload.create({
-    collection: "users",
+    collection: "identities",
     overrideAccess: true,
     data: {
       email,
       password: overrides.password ?? "test-password-123",
-      name: overrides.name ?? "Test User",
+      displayName: overrides.name ?? "Test User",
       role: overrides.role ?? "user",
     },
   });

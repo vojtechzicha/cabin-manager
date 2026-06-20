@@ -63,11 +63,15 @@ export type SupportedTimezones =
 
 export interface Config {
   auth: {
-    users: UserAuthOperations;
+    identities: IdentityAuthOperations;
   };
   blocks: {};
   collections: {
-    users: User;
+    identities: Identity;
+    trips: Trip;
+    memberships: Membership;
+    invitations: Invitation;
+    'login-tokens': LoginToken;
     'health-checks': HealthCheck;
     'audit-entries': AuditEntry;
     'payload-kv': PayloadKv;
@@ -77,7 +81,11 @@ export interface Config {
   };
   collectionsJoins: {};
   collectionsSelect: {
-    users: UsersSelect<false> | UsersSelect<true>;
+    identities: IdentitiesSelect<false> | IdentitiesSelect<true>;
+    trips: TripsSelect<false> | TripsSelect<true>;
+    memberships: MembershipsSelect<false> | MembershipsSelect<true>;
+    invitations: InvitationsSelect<false> | InvitationsSelect<true>;
+    'login-tokens': LoginTokensSelect<false> | LoginTokensSelect<true>;
     'health-checks': HealthChecksSelect<false> | HealthChecksSelect<true>;
     'audit-entries': AuditEntriesSelect<false> | AuditEntriesSelect<true>;
     'payload-kv': PayloadKvSelect<false> | PayloadKvSelect<true>;
@@ -95,13 +103,13 @@ export interface Config {
   widgets: {
     collections: CollectionsWidget;
   };
-  user: User;
+  user: Identity;
   jobs: {
     tasks: unknown;
     workflows: unknown;
   };
 }
-export interface UserAuthOperations {
+export interface IdentityAuthOperations {
   forgotPassword: {
     email: string;
     password: string;
@@ -121,12 +129,37 @@ export interface UserAuthOperations {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "users".
+ * via the `definition` "identities".
  */
-export interface User {
+export interface Identity {
   id: string;
-  name?: string | null;
-  role: 'admin' | 'user';
+  displayName?: string | null;
+  /**
+   * Avatar image URL.
+   */
+  avatar?: string | null;
+  role?: ('admin' | 'user') | null;
+  /**
+   * Per-user UI + system-message language (PRD §6).
+   */
+  preferredLanguage?: ('cs' | 'en') | null;
+  preferredChannel?: ('email' | 'whatsapp' | 'telegram' | 'inapp') | null;
+  providers?:
+    | {
+        provider: 'google' | 'microsoft';
+        providerAccountId: string;
+        email?: string | null;
+        id?: string | null;
+      }[]
+    | null;
+  contactChannels?:
+    | {
+        type: 'email' | 'phone' | 'telegram';
+        value: string;
+        label?: string | null;
+        id?: string | null;
+      }[]
+    | null;
   updatedAt: string;
   createdAt: string;
   email: string;
@@ -136,15 +169,207 @@ export interface User {
   hash?: string | null;
   loginAttempts?: number | null;
   lockUntil?: string | null;
-  sessions?:
-    | {
-        id: string;
-        createdAt?: string | null;
-        expiresAt: string;
-      }[]
-    | null;
   password?: string | null;
-  collection: 'users';
+  collection: 'identities';
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "trips".
+ */
+export interface Trip {
+  id: string;
+  name: string;
+  /**
+   * Used in payment messages (PRD §8.1). Keep it short.
+   */
+  shortName: string;
+  location?: string | null;
+  description?: string | null;
+  /**
+   * Per-trip branding (PRD §8.1, §12).
+   */
+  theme?: {
+    /**
+     * Accent color, e.g. #3b82f6.
+     */
+    color?: string | null;
+    icon?: string | null;
+    /**
+     * Cover/background image URL.
+     */
+    coverImage?: string | null;
+  };
+  /**
+   * Which areas the group collaborates on (PRD §8.1).
+   */
+  enabledAreas?: {
+    voting?: boolean | null;
+    sleeping?: boolean | null;
+    transport?: boolean | null;
+    lists?: boolean | null;
+    finances?: boolean | null;
+    deposit?: boolean | null;
+  };
+  phase?: ('draft' | 'ideation' | 'planning' | 'finances' | 'archived') | null;
+  datePollState?: ('open' | 'closed') | null;
+  locationPollState?: ('open' | 'closed') | null;
+  rosterState?: ('open' | 'locked') | null;
+  financeState?: ('open' | 'settling' | 'closed') | null;
+  /**
+   * Promoted from the date poll when it closes (T-305).
+   */
+  dates?: {
+    start?: string | null;
+    end?: string | null;
+  };
+  /**
+   * Banker bank details for settlement QR codes (PRD §8.5.4).
+   */
+  banker?: {
+    /**
+     * The banker Membership (also flagged isBanker).
+     */
+    membership?: (string | null) | Membership;
+    /**
+     * Czech account, e.g. 123456789/0100.
+     */
+    bankAccount?: string | null;
+    iban?: string | null;
+  };
+  /**
+   * Deposit-to-confirm config (PRD §8.3.2).
+   */
+  deposit?: {
+    enabled?: boolean | null;
+    /**
+     * Provisional until paid. Always on when deposit is enabled.
+     */
+    gated?: boolean | null;
+    /**
+     * The required basis is the participant's planned-cost share (T-501).
+     */
+    basis?: 'plannedCost' | null;
+  };
+  /**
+   * Invite settings (PRD §5).
+   */
+  invites?: {
+    /**
+     * Per-trip shareable join link. Off by default.
+     */
+    openJoinEnabled?: boolean | null;
+    /**
+     * Approve open-join requests automatically. Approval is required by default.
+     */
+    openJoinAutoAccept?: boolean | null;
+    /**
+     * SHA-256 of the open-join link token (the raw token is never stored).
+     */
+    openJoinTokenHash?: string | null;
+  };
+  /**
+   * Identity that created the trip (the first organizer).
+   */
+  createdBy?: (string | null) | Identity;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "memberships".
+ */
+export interface Membership {
+  id: string;
+  trip: string | Trip;
+  /**
+   * Null until the invitee logs in and claims the pending membership.
+   */
+  identity?: (string | null) | Identity;
+  /**
+   * Organizer pre-fill; falls back to the Identity's display name once claimed.
+   */
+  displayName?: string | null;
+  role?: ('organizer' | 'co-organizer' | 'participant') | null;
+  status?: ('pending' | 'active') | null;
+  /**
+   * The participant who holds the shared money (PRD §8.5).
+   */
+  isBanker?: boolean | null;
+  /**
+   * Deposit-confirmed (banker-driven, T-506). Provisional until set.
+   */
+  confirmed?: boolean | null;
+  /**
+   * Self-service attendance (T-401 expands this).
+   */
+  attendance?: {
+    status?: ('coming' | 'not' | 'maybe') | null;
+    arrival?: string | null;
+    departure?: string | null;
+    companions?: number | null;
+    pet?: boolean | null;
+  };
+  /**
+   * Czech account for refunds (PRD §8.5.4).
+   */
+  bankAccount?: string | null;
+  iban?: string | null;
+  preferredChannelOverride?: ('email' | 'whatsapp' | 'telegram' | 'inapp') | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "invitations".
+ */
+export interface Invitation {
+  id: string;
+  trip: string | Trip;
+  /**
+   * The pending membership this invitation activates.
+   */
+  membership?: (string | null) | Membership;
+  targetType?: ('email' | 'phone' | 'handle' | 'name') | null;
+  /**
+   * Email / phone / handle / name the invite was addressed to.
+   */
+  targetValue: string;
+  /**
+   * SHA-256 of the invite token. The raw token is never stored.
+   */
+  tokenHash: string;
+  status?: ('pending' | 'accepted' | 'expired') | null;
+  source?: ('direct' | 'open-link') | null;
+  expiresAt: string;
+  /**
+   * When the invite was redeemed (single-use replay guard).
+   */
+  acceptedAt?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "login-tokens".
+ */
+export interface LoginToken {
+  id: string;
+  /**
+   * Email the magic link was issued for (lowercased).
+   */
+  email: string;
+  /**
+   * Resolved at mint time when the email already has an Identity.
+   */
+  identity?: (string | null) | Identity;
+  tokenHash: string;
+  expiresAt: string;
+  /**
+   * Set on first redemption; a used token is rejected (replay protection).
+   */
+  usedAt?: string | null;
+  updatedAt: string;
+  createdAt: string;
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
@@ -166,7 +391,7 @@ export interface AuditEntry {
   /**
    * Who performed the action (null for system actions).
    */
-  actor?: (string | null) | User;
+  actor?: (string | null) | Identity;
   /**
    * Dotted action key, e.g. finance.accounts.closed.
    */
@@ -174,7 +399,7 @@ export interface AuditEntry {
   targetType: string;
   targetId: string;
   /**
-   * Trip id the entry belongs to (queryable). Becomes a relationship in T-101.
+   * Trip id the entry belongs to (queryable). Kept as a plain id, not a relationship, so the audit trail stays valid even if a trip is later removed — an audit log must not lose entries to referential cleanup.
    */
   trip?: string | null;
   metadata?:
@@ -214,8 +439,24 @@ export interface PayloadLockedDocument {
   id: string;
   document?:
     | ({
-        relationTo: 'users';
-        value: string | User;
+        relationTo: 'identities';
+        value: string | Identity;
+      } | null)
+    | ({
+        relationTo: 'trips';
+        value: string | Trip;
+      } | null)
+    | ({
+        relationTo: 'memberships';
+        value: string | Membership;
+      } | null)
+    | ({
+        relationTo: 'invitations';
+        value: string | Invitation;
+      } | null)
+    | ({
+        relationTo: 'login-tokens';
+        value: string | LoginToken;
       } | null)
     | ({
         relationTo: 'health-checks';
@@ -227,8 +468,8 @@ export interface PayloadLockedDocument {
       } | null);
   globalSlug?: string | null;
   user: {
-    relationTo: 'users';
-    value: string | User;
+    relationTo: 'identities';
+    value: string | Identity;
   };
   updatedAt: string;
   createdAt: string;
@@ -240,8 +481,8 @@ export interface PayloadLockedDocument {
 export interface PayloadPreference {
   id: string;
   user: {
-    relationTo: 'users';
-    value: string | User;
+    relationTo: 'identities';
+    value: string | Identity;
   };
   key?: string | null;
   value?:
@@ -269,11 +510,30 @@ export interface PayloadMigration {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "users_select".
+ * via the `definition` "identities_select".
  */
-export interface UsersSelect<T extends boolean = true> {
-  name?: T;
+export interface IdentitiesSelect<T extends boolean = true> {
+  displayName?: T;
+  avatar?: T;
   role?: T;
+  preferredLanguage?: T;
+  preferredChannel?: T;
+  providers?:
+    | T
+    | {
+        provider?: T;
+        providerAccountId?: T;
+        email?: T;
+        id?: T;
+      };
+  contactChannels?:
+    | T
+    | {
+        type?: T;
+        value?: T;
+        label?: T;
+        id?: T;
+      };
   updatedAt?: T;
   createdAt?: T;
   email?: T;
@@ -283,13 +543,125 @@ export interface UsersSelect<T extends boolean = true> {
   hash?: T;
   loginAttempts?: T;
   lockUntil?: T;
-  sessions?:
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "trips_select".
+ */
+export interface TripsSelect<T extends boolean = true> {
+  name?: T;
+  shortName?: T;
+  location?: T;
+  description?: T;
+  theme?:
     | T
     | {
-        id?: T;
-        createdAt?: T;
-        expiresAt?: T;
+        color?: T;
+        icon?: T;
+        coverImage?: T;
       };
+  enabledAreas?:
+    | T
+    | {
+        voting?: T;
+        sleeping?: T;
+        transport?: T;
+        lists?: T;
+        finances?: T;
+        deposit?: T;
+      };
+  phase?: T;
+  datePollState?: T;
+  locationPollState?: T;
+  rosterState?: T;
+  financeState?: T;
+  dates?:
+    | T
+    | {
+        start?: T;
+        end?: T;
+      };
+  banker?:
+    | T
+    | {
+        membership?: T;
+        bankAccount?: T;
+        iban?: T;
+      };
+  deposit?:
+    | T
+    | {
+        enabled?: T;
+        gated?: T;
+        basis?: T;
+      };
+  invites?:
+    | T
+    | {
+        openJoinEnabled?: T;
+        openJoinAutoAccept?: T;
+        openJoinTokenHash?: T;
+      };
+  createdBy?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "memberships_select".
+ */
+export interface MembershipsSelect<T extends boolean = true> {
+  trip?: T;
+  identity?: T;
+  displayName?: T;
+  role?: T;
+  status?: T;
+  isBanker?: T;
+  confirmed?: T;
+  attendance?:
+    | T
+    | {
+        status?: T;
+        arrival?: T;
+        departure?: T;
+        companions?: T;
+        pet?: T;
+      };
+  bankAccount?: T;
+  iban?: T;
+  preferredChannelOverride?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "invitations_select".
+ */
+export interface InvitationsSelect<T extends boolean = true> {
+  trip?: T;
+  membership?: T;
+  targetType?: T;
+  targetValue?: T;
+  tokenHash?: T;
+  status?: T;
+  source?: T;
+  expiresAt?: T;
+  acceptedAt?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "login-tokens_select".
+ */
+export interface LoginTokensSelect<T extends boolean = true> {
+  email?: T;
+  identity?: T;
+  tokenHash?: T;
+  expiresAt?: T;
+  usedAt?: T;
+  updatedAt?: T;
+  createdAt?: T;
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema

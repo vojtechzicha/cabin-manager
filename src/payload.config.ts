@@ -7,7 +7,11 @@ import { buildConfig, type SharpDependency } from "payload";
 import sharp from "sharp";
 
 import { getEnv } from "@/lib/env";
-import { Users } from "@/collections/Users";
+import { Identities } from "@/collections/Identities";
+import { Trips } from "@/collections/Trips";
+import { Memberships } from "@/collections/Memberships";
+import { Invitations } from "@/collections/Invitations";
+import { LoginTokens } from "@/collections/LoginTokens";
 import { HealthChecks } from "@/collections/HealthChecks";
 import { AuditEntries } from "@/collections/AuditEntries";
 
@@ -17,9 +21,17 @@ const env = getEnv();
 export default buildConfig({
   serverURL: env.APP_URL,
   admin: {
-    user: Users.slug,
+    user: Identities.slug,
   },
-  collections: [Users, HealthChecks, AuditEntries],
+  collections: [
+    Identities,
+    Trips,
+    Memberships,
+    Invitations,
+    LoginTokens,
+    HealthChecks,
+    AuditEntries,
+  ],
   editor: lexicalEditor(),
   secret: env.PAYLOAD_SECRET,
   typescript: {

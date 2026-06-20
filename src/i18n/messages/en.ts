@@ -30,6 +30,15 @@ export const en: Messages = {
     offerRide: "Hi {name}, offer or claim a ride for “{trip}”.",
     payUp: "Hi {name}, you still owe {amount} on “{trip}”.",
   },
+  invite: {
+    subject: "You're invited to “{trip}”",
+    body: "Hi {name}, {organizer} invited you to “{trip}”. Join with this link:",
+    shareText: "Come join us on “{trip}”! Join here:",
+  },
+  magicLink: {
+    subject: "Sign in to Chata",
+    body: "Hi, sign in to Chata with this link. It's valid for {minutes} minutes:",
+  },
   gallery: {
     title: "Design system",
     subtitle: "Components, states, and colors shared across the app.",

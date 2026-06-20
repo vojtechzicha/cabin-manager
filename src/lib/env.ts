@@ -20,6 +20,15 @@ export interface Env {
   readonly PAYLOAD_SECRET: string;
   /** Public origin used when building absolute URLs (invites, magic links). */
   readonly APP_URL: string;
+  /**
+   * OAuth provider credentials (T-102). Optional: a provider is only offered
+   * when both its id and secret are present, so local dev and tests run without
+   * any OAuth setup.
+   */
+  readonly GOOGLE_CLIENT_ID?: string;
+  readonly GOOGLE_CLIENT_SECRET?: string;
+  readonly MICROSOFT_CLIENT_ID?: string;
+  readonly MICROSOFT_CLIENT_SECRET?: string;
 }
 
 class EnvError extends Error {
@@ -63,11 +72,25 @@ export function parseEnv(source: EnvSource = process.env): Env {
 
   const APP_URL = source.APP_URL?.trim() || "http://localhost:3000";
 
+  const optional = (key: string): string | undefined => {
+    const v = source[key]?.trim();
+    return v ? v : undefined;
+  };
+
   if (problems.length > 0) {
     throw new EnvError(problems);
   }
 
-  return Object.freeze({ NODE_ENV, DATABASE_URI, PAYLOAD_SECRET, APP_URL });
+  return Object.freeze({
+    NODE_ENV,
+    DATABASE_URI,
+    PAYLOAD_SECRET,
+    APP_URL,
+    GOOGLE_CLIENT_ID: optional("GOOGLE_CLIENT_ID"),
+    GOOGLE_CLIENT_SECRET: optional("GOOGLE_CLIENT_SECRET"),
+    MICROSOFT_CLIENT_ID: optional("MICROSOFT_CLIENT_ID"),
+    MICROSOFT_CLIENT_SECRET: optional("MICROSOFT_CLIENT_SECRET"),
+  });
 }
 
 let cached: Env | undefined;
