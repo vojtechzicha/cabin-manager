@@ -8,7 +8,8 @@ import type { Messages } from "@/i18n";
 import { getRequestLocale } from "@/i18n/server";
 import { listJoinRequests } from "@/services/invitations";
 import { openJoinUrl } from "@/services/urls";
-import { identityOrganizesTrip, listMemberships } from "@/services/trips";
+import { getMembership, listMemberships } from "@/services/trips";
+import { ORGANIZER_ROLES } from "@/access";
 import type { Identity, Membership, Trip } from "@/payload-types";
 
 import { getCurrentIdentity } from "../../../auth/current-user";
@@ -41,9 +42,12 @@ export default async function PeoplePage({
   const { m } = getTranslator(locale);
   const { payload, identity } = await getCurrentIdentity();
 
-  if (!identity || !(await identityOrganizesTrip(payload, tripId, identity.id))) {
-    redirect(`/trips/${tripId}`);
-  }
+  if (!identity) redirect(`/sign-in?next=${encodeURIComponent(`/trips/${tripId}/people`)}`);
+  const membership = await getMembership(payload, tripId, identity.id);
+  if (!membership || membership.status !== "active") redirect(`/trips/${tripId}`);
+  // Every member sees the roster (read-only); only organizers get the management
+  // controls below (PRD §5: members read the roster, organizers manage it).
+  const isOrganizer = (ORGANIZER_ROLES as readonly string[]).includes(membership.role ?? "");
 
   const trip = (await payload.findByID({
     collection: "trips",
@@ -51,10 +55,11 @@ export default async function PeoplePage({
     overrideAccess: true,
   })) as Trip;
   const roster = await listMemberships(payload, tripId);
-  const requests = await listJoinRequests(payload, tripId);
-  const openJoinOn = trip.invites?.openJoinEnabled ?? false;
+  const requests = isOrganizer ? await listJoinRequests(payload, tripId) : [];
+  const openJoinOn = isOrganizer && (trip.invites?.openJoinEnabled ?? false);
   const autoAccept = trip.invites?.openJoinAutoAccept ?? false;
-  const openJoinLink = trip.invites?.openJoinToken ? openJoinUrl(trip.invites.openJoinToken) : null;
+  const openJoinLink =
+    isOrganizer && trip.invites?.openJoinToken ? openJoinUrl(trip.invites.openJoinToken) : null;
 
   const selfId = (identity as Identity).id;
   const identityId = (membership: Membership): string | null => {
@@ -68,35 +73,38 @@ export default async function PeoplePage({
       <PageHero backHref={`/trips/${tripId}`} kicker={trip.shortName} title={m.console.people} />
 
       <div className="flex flex-col gap-4 px-5 pt-6 lg:px-8">
-        {/* Approval queue */}
-        <Card>
-          <SectionLabel>{m.people.approvalQueue}</SectionLabel>
-          {requests.length === 0 ? (
-            <p className="mt-2 text-sm text-muted">{m.people.noRequests}</p>
-          ) : (
-            <div className="mt-3 flex flex-col divide-y divide-line">
-              {requests.map((req) => (
-                <div key={req.id} className="flex items-center justify-between gap-3 py-3 first:pt-0">
-                  <div className="text-sm font-semibold">{memberName(req)}</div>
-                  <form action={approveJoinAction.bind(null, tripId, String(req.id))}>
-                    <Button type="submit" className="px-3 py-1.5 text-[13px]">
-                      {m.people.approve}
-                    </Button>
-                  </form>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
+        {/* Approval queue (organizers only) */}
+        {isOrganizer ? (
+          <Card>
+            <SectionLabel>{m.people.approvalQueue}</SectionLabel>
+            {requests.length === 0 ? (
+              <p className="mt-2 text-sm text-muted">{m.people.noRequests}</p>
+            ) : (
+              <div className="mt-3 flex flex-col divide-y divide-line">
+                {requests.map((req) => (
+                  <div key={req.id} className="flex items-center justify-between gap-3 py-3 first:pt-0">
+                    <div className="text-sm font-semibold">{memberName(req)}</div>
+                    <form action={approveJoinAction.bind(null, tripId, String(req.id))}>
+                      <Button type="submit" className="px-3 py-1.5 text-[13px]">
+                        {m.people.approve}
+                      </Button>
+                    </form>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        ) : null}
 
-        {/* Roster + role management */}
+        {/* Roster — visible to every member */}
         <Card>
           <SectionLabel>{m.people.roster}</SectionLabel>
           <div className="mt-3 flex flex-col divide-y divide-line">
             {roster.map((member) => {
               const mid = identityId(member);
               const isSelf = mid != null && mid === String(selfId);
-              const isOrganizer = member.role === "organizer" || member.role === "co-organizer";
+              // This row's role — distinct from `isOrganizer` (the viewer's powers).
+              const memberIsOrganizer = member.role === "organizer" || member.role === "co-organizer";
               return (
                 <div
                   key={member.id}
@@ -123,17 +131,17 @@ export default async function PeoplePage({
                       ) : null}
                     </div>
                   </div>
-                  {!isSelf && member.status === "active" ? (
+                  {isOrganizer && !isSelf && member.status === "active" ? (
                     <form
                       action={setRoleAction.bind(
                         null,
                         tripId,
                         String(member.id),
-                        isOrganizer ? "participant" : "co-organizer",
+                        memberIsOrganizer ? "participant" : "co-organizer",
                       )}
                     >
                       <Button variant="secondary" type="submit" className="px-3 py-1.5 text-[13px]">
-                        {isOrganizer ? m.people.makeParticipant : m.people.makeCoOrganizer}
+                        {memberIsOrganizer ? m.people.makeParticipant : m.people.makeCoOrganizer}
                       </Button>
                     </form>
                   ) : null}
@@ -143,15 +151,18 @@ export default async function PeoplePage({
           </div>
         </Card>
 
-        {/* Direct invite */}
+        {/* Direct invite (organizers only) */}
+        {isOrganizer ? (
         <Card>
           <SectionLabel>{m.people.invite}</SectionLabel>
           <div className="mt-3">
             <InviteForm action={createInviteAction.bind(null, tripId)} />
           </div>
         </Card>
+        ) : null}
 
-        {/* Open-join link */}
+        {/* Open-join link (organizers only) */}
+        {isOrganizer ? (
         <Card>
           <div className="flex items-center justify-between">
             <SectionLabel>{m.people.openJoin}</SectionLabel>
@@ -199,6 +210,7 @@ export default async function PeoplePage({
             </div>
           )}
         </Card>
+        ) : null}
       </div>
     </>
   );

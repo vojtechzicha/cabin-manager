@@ -77,11 +77,10 @@ export default async function TripConsoleLayout({
     { key: "overview", href: base, label: m.console.overview, icon: "⌂" },
     ...(areas.voting ? [{ key: "plan", href: `${base}/plan`, label: m.nav.plan, icon: "🗳" }] : []),
     { key: "info", href: `${base}/info`, label: m.console.info, icon: "ⓘ" },
+    // Every member sees the roster (read-only); Settings stays organizer-only.
+    { key: "people", href: `${base}/people`, label: m.console.people, icon: "👥" },
     ...(isOrganizer
-      ? [
-          { key: "people", href: `${base}/people`, label: m.console.people, icon: "👥" },
-          { key: "settings", href: `${base}/settings`, label: m.console.settings, icon: "⚙" },
-        ]
+      ? [{ key: "settings", href: `${base}/settings`, label: m.console.settings, icon: "⚙" }]
       : []),
   ];
 
