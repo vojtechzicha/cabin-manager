@@ -53,7 +53,13 @@ export function LanguageSwitcher({ tone = "light" }: { tone?: "light" | "dark" }
   function choose(next: string) {
     setOpen(false);
     if (next === active) return;
-    writeLocaleCookie(next);
+    writeLocaleCookie(next); // immediate
+    // Persist to the signed-in Identity (best-effort; the cookie already applies).
+    void fetch("/auth/locale", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ locale: next }),
+    }).catch(() => undefined);
     startTransition(() => router.refresh());
   }
 

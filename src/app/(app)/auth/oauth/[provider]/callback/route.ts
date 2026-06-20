@@ -2,6 +2,9 @@ import config from "@payload-config";
 import { getPayload } from "payload";
 import { NextResponse, type NextRequest } from "next/server";
 
+import { isLocale } from "@/i18n";
+import { resolveLocale } from "@/i18n/resolve";
+import { LOCALE_COOKIE } from "@/i18n/server";
 import { getEnv } from "@/lib/env";
 import { isAuthError } from "@/services/auth-errors";
 import { fetchProfile, loginWithOAuth } from "@/services/oauth";
@@ -40,12 +43,17 @@ export async function GET(
     const payload = await getPayload({ config });
     const redirectUri = `${appUrl}/auth/oauth/${provider}/callback`;
     const profile = await fetchProfile(provider as OAuthProvider, { code, redirectUri });
-    const { identity } = await loginWithOAuth(payload, profile);
+    const browserLocale = resolveLocale({ acceptLanguage: request.headers.get("accept-language") });
+    const { identity } = await loginWithOAuth(payload, profile, { browserLocale });
     const issued = await issueAuthToken(payload, identity);
 
     const res = completeAuth(issued, request.cookies.get("oauth_next")?.value);
     res.cookies.delete("oauth_state");
     res.cookies.delete("oauth_next");
+    // Apply the account's saved language on login.
+    if (identity.preferredLanguage && isLocale(identity.preferredLanguage)) {
+      res.cookies.set(LOCALE_COOKIE, identity.preferredLanguage, { path: "/", maxAge: 60 * 60 * 24 * 365, sameSite: "lax" });
+    }
     return res;
   } catch (err) {
     const code2 = isAuthError(err) ? err.code : "error";

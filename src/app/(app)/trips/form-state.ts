@@ -5,6 +5,11 @@
  * it. `fieldErrors` values are validation *codes* (e.g. "required") that the
  * client maps to localized messages.
  */
+import type { ShareIntent } from "@/lib/share-intents";
+
 export type FormState =
   | { ok?: boolean; error?: string; message?: string; fieldErrors?: Record<string, string> }
   | null;
+
+/** Result of creating a direct invite: the URL + share intents, or an error code. */
+export type InviteState = { url?: string; shareIntents?: ShareIntent[]; error?: string } | null;

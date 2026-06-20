@@ -79,6 +79,23 @@ function tallyOf(byMember: Map<string, Val> | undefined): { yes: number; ifneede
   return t;
 }
 
+/**
+ * Count voters who have *finished* the poll — every visible option answered
+ * (approval / grid), or a single pick made (single choice) — not merely those
+ * who cast any one vote.
+ */
+function countFinished(votes: Vote[], requiredOptions: number): number {
+  const byVoter = new Map<string, Set<string>>();
+  for (const v of votes) {
+    const set = byVoter.get(relId(v.membership)) ?? new Set<string>();
+    set.add(relId(v.option));
+    byVoter.set(relId(v.membership), set);
+  }
+  let done = 0;
+  for (const answered of byVoter.values()) if (answered.size >= requiredOptions) done++;
+  return done;
+}
+
 // ── small presentational pieces ─────────────────────────────────────────────
 
 function StatusChip({ label, tone, sub }: { label: string; tone: "draft" | "open" | "closed"; sub: string }) {
@@ -492,7 +509,8 @@ export default async function PlanPage({
   const datePublished = !!datePoll?.published;
   const dateMethod = (datePoll?.method ?? "approval") as PollMethod;
   const dateWinnerId = datePoll?.winnerOption ? relId(datePoll.winnerOption) : null;
-  const dateVotersDone = new Set(dateVotes.map((v) => relId(v.membership))).size;
+  // Approval/grid: finished = answered every window.
+  const dateVotersDone = countFinished(dateVotes, Math.max(1, dateOptions.length));
 
   // Location poll
   const locPoll = await getPoll(payload, tripId, "location");
@@ -502,7 +520,7 @@ export default async function PlanPage({
   const locByOption = indexVotes(locVotes);
   const locClosed = trip.locationPollState === "closed";
   const locPublished = !!locPoll?.published;
-  const locVotersDone = new Set(locVotes.map((v) => relId(v.membership))).size;
+  const locVotersDone = countFinished(locVotes, 1); // single choice: one pick = done
 
   const optionsById = new Map(dateOptions.map((o) => [String(o.id), o] as const));
   const best = ranked[0];
@@ -536,8 +554,8 @@ export default async function PlanPage({
 
           {/* ───────── DATE POLL ───────── */}
           <section className="flex flex-col gap-3.5">
-            {/* Best banner (when there are votes & not closed) */}
-            {best && !dateClosed && dateOptions.length > 0 ? (
+            {/* Best banner — only once at least one vote is in (no "best" from an empty poll) */}
+            {best && dateVotes.length > 0 && !dateClosed && dateOptions.length > 0 ? (
               <div className="flex items-center gap-2.5 rounded-2xl border border-[#cfe9da] bg-accent-soft px-3.5 py-3">
                 <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[11px] bg-accent text-[17px] text-white">★</div>
                 <div>
@@ -555,10 +573,11 @@ export default async function PlanPage({
                 tripId={tripId}
                 kind="date"
                 winner={dateWinnerId ? optionsById.get(dateWinnerId) ?? dateOptions.find((o) => String(o.id) === dateWinnerId) : undefined}
+                winnerId={dateWinnerId}
                 ranked={ranked}
                 optionsById={optionsById}
                 total={total}
-                attendees={best?.attendees ?? 0}
+                attendees={(dateWinnerId ? ranked.find((r) => r.id === dateWinnerId)?.attendees : undefined) ?? best?.attendees ?? 0}
                 locale={locale}
                 isOrganizer={isOrganizer}
                 m={m}
@@ -662,6 +681,7 @@ export default async function PlanPage({
                 tripId={tripId}
                 kind="location"
                 winner={locPoll?.winnerOption ? locOptions.find((o) => String(o.id) === relId(locPoll.winnerOption)) : undefined}
+                winnerId={locPoll?.winnerOption ? relId(locPoll.winnerOption) : null}
                 ranked={[]}
                 optionsById={new Map(locOptions.map((o) => [String(o.id), o]))}
                 total={total}
@@ -839,6 +859,7 @@ function ClosedResult({
   tripId,
   kind,
   winner,
+  winnerId,
   ranked,
   optionsById,
   total,
@@ -850,6 +871,7 @@ function ClosedResult({
   tripId: string;
   kind: PollKind;
   winner: PollOption | undefined;
+  winnerId: string | null;
   ranked: RankedDateOption[];
   optionsById: Map<string, PollOption>;
   total: number;
@@ -880,11 +902,12 @@ function ClosedResult({
         <div>
           <SectionLabel className="mb-2">{m.voting.finalResult}</SectionLabel>
           <div className="flex flex-col gap-1.5">
-            {ranked.slice(0, 4).map((r, i) => {
+            {ranked.slice(0, 4).map((r) => {
               const o = optionsById.get(r.id);
+              const isWinner = winnerId != null && r.id === winnerId;
               return (
-                <div key={r.id} className={`flex items-center gap-2.5 rounded-xl border bg-card px-3 py-2.5 ${i === 0 ? "border-[#cfe9da]" : "border-line opacity-70"}`}>
-                  {i === 0 ? <span>★</span> : <span className="w-[14px]" />}
+                <div key={r.id} className={`flex items-center gap-2.5 rounded-xl border bg-card px-3 py-2.5 ${isWinner ? "border-[#cfe9da]" : "border-line opacity-70"}`}>
+                  {isWinner ? <span>★</span> : <span className="w-[14px]" />}
                   <span className="mono flex-1 text-[12px] font-bold">{o ? windowLabel(locale, o) : r.id}</span>
                   <span className="mono text-[12px] font-bold text-accent-ink">{r.score}</span>
                 </div>

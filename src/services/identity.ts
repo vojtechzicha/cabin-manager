@@ -19,6 +19,28 @@ export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
+/** Find the Identity that already has a given provider account linked, or null. */
+export async function findIdentityByProvider(
+  payload: Payload,
+  provider: OAuthProvider,
+  providerAccountId: string,
+  req?: PayloadRequest,
+): Promise<Identity | null> {
+  const res = await payload.find({
+    collection: "identities",
+    overrideAccess: true,
+    limit: 1,
+    req,
+    where: {
+      and: [
+        { "providers.provider": { equals: provider } },
+        { "providers.providerAccountId": { equals: providerAccountId } },
+      ],
+    },
+  });
+  return res.docs[0] ?? null;
+}
+
 /** Find an Identity by its primary email (normalized), or null. */
 export async function findIdentityByEmail(
   payload: Payload,

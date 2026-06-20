@@ -13,7 +13,8 @@
  */
 import type { Payload, PayloadRequest } from "payload";
 
-import { expiryFromNow, generateToken, hashToken, isExpired } from "@/lib/tokens";
+import type { Locale } from "@/i18n";
+import { expiryFromNow, generateToken, hashToken } from "@/lib/tokens";
 import type { Identity, LoginToken, Membership } from "@/payload-types";
 
 import { AuthError } from "./auth-errors";
@@ -33,10 +34,15 @@ export interface MintedMagicLink {
   identityExists: boolean;
 }
 
-/** Mint a magic-link login token for `email`. Delivery is separate (T-105). */
+/**
+ * Mint a magic-link login token for `email`. Delivery is separate (T-105).
+ * An optional `next` (an in-app path) is carried in the link so redemption can
+ * land the user where they were headed (e.g. an open-join page).
+ */
 export async function mintMagicLink(
   payload: Payload,
   email: string,
+  opts: { next?: string } = {},
   req?: PayloadRequest,
 ): Promise<MintedMagicLink> {
   const normalized = normalizeEmail(email);
@@ -56,7 +62,11 @@ export async function mintMagicLink(
     },
   });
 
-  return { token: raw, url: magicLinkUrl(raw), expiresAt, identityExists: Boolean(existing) };
+  const url =
+    opts.next && opts.next.startsWith("/")
+      ? `${magicLinkUrl(raw)}&next=${encodeURIComponent(opts.next)}`
+      : magicLinkUrl(raw);
+  return { token: raw, url, expiresAt, identityExists: Boolean(existing) };
 }
 
 export interface MagicLinkConsumeResult {
@@ -75,32 +85,51 @@ export interface MagicLinkConsumeResult {
 export async function consumeMagicLink(
   payload: Payload,
   rawToken: string,
+  opts: { browserLocale?: Locale } = {},
   req?: PayloadRequest,
 ): Promise<MagicLinkConsumeResult> {
-  const res = await payload.find({
-    collection: "login-tokens",
-    depth: 0,
-    limit: 1,
-    overrideAccess: true,
-    where: { tokenHash: { equals: hashToken(rawToken) } },
-    req,
-  });
-  const token: LoginToken | undefined = res.docs[0];
-  if (!token) throw new AuthError("invalid_token");
-  if (token.usedAt) throw new AuthError("used_token");
-  if (isExpired(token.expiresAt)) throw new AuthError("expired_token");
+  const hash = hashToken(rawToken);
+  const now = new Date();
 
-  // Burn the token first: a used token is rejected above, closing the replay
-  // window before any account side effects happen.
-  await payload.update({
+  // Atomic burn: mark the token used **only if it's still unused and unexpired**,
+  // in a single conditional write. MongoDB applies the filter at write time, so
+  // two concurrent redemptions can't both succeed — the loser modifies nothing.
+  const burned = await payload.update({
     collection: "login-tokens",
-    id: token.id,
     overrideAccess: true,
     req,
-    data: { usedAt: new Date().toISOString() },
+    where: {
+      and: [
+        { tokenHash: { equals: hash } },
+        { usedAt: { exists: false } },
+        { expiresAt: { greater_than: now.toISOString() } },
+      ],
+    },
+    data: { usedAt: now.toISOString() },
   });
+  const token: LoginToken | undefined = burned.docs[0];
+  if (!token) {
+    // Nothing burned — say *why* for the UI (unknown / already-used / expired).
+    const found = await payload.find({
+      collection: "login-tokens",
+      depth: 0,
+      limit: 1,
+      overrideAccess: true,
+      req,
+      where: { tokenHash: { equals: hash } },
+    });
+    const existing = found.docs[0];
+    if (!existing) throw new AuthError("invalid_token");
+    if (existing.usedAt) throw new AuthError("used_token");
+    throw new AuthError("expired_token");
+  }
 
-  const { identity, created } = await ensureIdentity(payload, { email: token.email }, req);
+  // A brand-new account defaults to the browser's language, not always Czech.
+  const { identity, created } = await ensureIdentity(
+    payload,
+    { email: token.email, preferredLanguage: opts.browserLocale },
+    req,
+  );
   const activatedMemberships = await resolvePendingInvitesForEmail(payload, identity, req);
 
   return { identity, created, activatedMemberships };

@@ -6,6 +6,7 @@ import { getTranslator } from "@/i18n";
 import type { Messages } from "@/i18n";
 import { getRequestLocale } from "@/i18n/server";
 import { auditEntriesForTrip } from "@/services/audit";
+import { getPoll } from "@/services/polls";
 import { getMembership, listMemberships } from "@/services/trips";
 import { ORGANIZER_ROLES } from "@/access";
 import type { AuditEntry, Membership, Trip } from "@/payload-types";
@@ -178,9 +179,13 @@ export default async function TripDashboardPage({
   })) as Trip;
 
   const membership = identity ? await getMembership(payload, tripId, identity.id) : null;
+  // Organizer powers are membership-scoped (same rule as /plan and /people) — a
+  // platform admin viewing a trip they don't organize is treated as a viewer, so
+  // the dashboard never offers organizer actions the inner pages would refuse.
   const isOrganizer =
-    (membership?.role != null && (ORGANIZER_ROLES as readonly string[]).includes(membership.role)) ||
-    identity?.role === "admin";
+    membership?.status === "active" &&
+    membership.role != null &&
+    (ORGANIZER_ROLES as readonly string[]).includes(membership.role);
 
   const roster = await listMemberships(payload, tripId);
   const active = roster.filter((r) => r.status === "active");
@@ -203,6 +208,17 @@ export default async function TripDashboardPage({
     .slice(0, 4);
 
   const datesLocked = trip.datePollState === "closed";
+
+  // Voting status reflects the *real* poll state, not just the area lock: a draft
+  // poll that was never published is "set up", not "open" (must match /plan).
+  const datePoll = areas.voting ? await getPoll(payload, tripId, "date") : null;
+  const votingValue = datesLocked
+    ? m.voting.dashLocked
+    : datePoll?.published
+      ? m.voting.dashOpen
+      : isOrganizer
+        ? m.voting.dashSetup
+        : m.voting.dashSoon;
 
   return (
     <>
@@ -237,13 +253,13 @@ export default async function TripDashboardPage({
               label={m.console.dashRoster}
               value={String(active.length)}
               sub={confirmed > 0 ? `${confirmed} ${m.people.confirmed.toLowerCase()}` : undefined}
-              href={isOrganizer ? `/trips/${tripId}/people` : undefined}
+              href={`/trips/${tripId}/people`}
             />
             {areas.voting ? (
               <StatCard
                 icon="🗳"
                 label={m.console.areaVoting}
-                value={trip.datePollState === "closed" ? m.voting.dashLocked : m.voting.dashOpen}
+                value={votingValue}
                 href={`/trips/${tripId}/plan`}
               />
             ) : null}

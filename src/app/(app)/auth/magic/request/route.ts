@@ -16,10 +16,13 @@ import { mintMagicLink, MAGIC_LINK_TTL_MINUTES } from "@/services/magic-link";
 export async function POST(request: Request): Promise<Response> {
   let email = "";
   let requestedLocale: string | undefined;
+  let next: string | undefined;
   try {
-    const body = (await request.json()) as { email?: unknown; locale?: unknown };
+    const body = (await request.json()) as { email?: unknown; locale?: unknown; next?: unknown };
     if (typeof body.email === "string") email = body.email.trim();
     if (typeof body.locale === "string") requestedLocale = body.locale;
+    // Only accept an in-app path (open redirect guard).
+    if (typeof body.next === "string" && body.next.startsWith("/")) next = body.next;
   } catch {
     // fall through to the validation below
   }
@@ -34,7 +37,7 @@ export async function POST(request: Request): Promise<Response> {
     (requestedLocale && isLocale(requestedLocale) ? requestedLocale : undefined) ??
     defaultLocale;
 
-  const minted = await mintMagicLink(payload, email);
+  const minted = await mintMagicLink(payload, email, { next });
   await deliverMagicLink(payload, {
     email,
     url: minted.url,

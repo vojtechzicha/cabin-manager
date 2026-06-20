@@ -63,7 +63,7 @@ export function SignInForm({ next }: { next?: string }) {
       await fetch("/auth/magic/request", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email: email.trim(), locale }),
+        body: JSON.stringify({ email: email.trim(), locale, next }),
       });
       setSent(true);
       setCooldown(RESEND_COOLDOWN);

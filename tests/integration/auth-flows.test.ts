@@ -219,6 +219,16 @@ describe("OAuth login (T-102)", () => {
     ]);
   });
 
+  it("resolves by provider account id even after the email changes", async () => {
+    const addr = email("oauth-rekey");
+    const first = await loginWithOAuth(payload, profile("google", addr));
+    // Same Google account (same providerAccountId), but a different email now.
+    const moved = { ...profile("google", addr), email: email("oauth-rekey-new") };
+    const second = await loginWithOAuth(payload, moved);
+    expect(second.created).toBe(false);
+    expect(String(second.identity.id)).toBe(String(first.identity.id));
+  });
+
   it("refuses an unverified OAuth email", async () => {
     const bad = { ...profile("google", email("unverified")), emailVerified: false };
     await expect(loginWithOAuth(payload, bad)).rejects.toMatchObject({ code: "invalid_token" });

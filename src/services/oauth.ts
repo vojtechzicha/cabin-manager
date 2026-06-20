@@ -14,11 +14,18 @@
  */
 import type { Payload, PayloadRequest } from "payload";
 
+import type { Locale } from "@/i18n";
 import { getEnv } from "@/lib/env";
 import type { Identity, Membership } from "@/payload-types";
 
 import { AuthError } from "./auth-errors";
-import { ensureIdentity, linkProvider, type OAuthProvider } from "./identity";
+import {
+  ensureIdentity,
+  findIdentityByEmail,
+  findIdentityByProvider,
+  linkProvider,
+  type OAuthProvider,
+} from "./identity";
 import { resolvePendingInvitesForEmail } from "./invitations";
 
 interface ProviderEndpoints {
@@ -168,9 +175,15 @@ export async function fetchProfile(
     providerAccountId:
       asString(info.sub) ?? asString(info.oid) ?? asString(idClaims.sub) ?? asString(idClaims.oid) ?? email,
     email,
-    // Google returns a boolean; Microsoft's verified emails come through Graph.
+    // Verify from an explicit claim only — never blanket-trust a provider.
+    // Google sends `email_verified`; Microsoft Entra signals a verified primary
+    // email via `xms_edov` (email domain owner verified). An MS account without
+    // it is treated as unverified, so it can't silently claim an existing
+    // account (the login is rejected by `loginWithOAuth`).
     emailVerified:
-      verified(info.email_verified) || verified(idClaims.email_verified) || provider === "microsoft",
+      verified(info.email_verified) ||
+      verified(idClaims.email_verified) ||
+      verified((idClaims as { xms_edov?: unknown }).xms_edov),
     // Prefer userinfo's name, then the id_token's (Microsoft omits it from userinfo).
     name: fullName(info) ?? fullName(idClaims),
   };
@@ -183,15 +196,17 @@ export interface OAuthLoginResult {
 }
 
 /**
- * Resolve a provider profile to a single Identity (T-102 acceptance criteria):
- * find-or-create by verified email, link the provider account, and claim any
- * pending invitations for that email. The email **must be verified** — we link
- * on verified email only, so an attacker can't take over an account with an
- * unverified provider address.
+ * Resolve a provider profile to a single Identity (T-102 acceptance criteria).
+ * Resolution order: **(1) the provider account id** — the stable identifier, so a
+ * previously-linked account is recognised even if its email changed, and one
+ * provider account can never attach to a second Identity; **(2) the verified
+ * email**; **(3) create**. The email **must be verified** — we only link on a
+ * verified address, so an unverified provider email can't take over an account.
  */
 export async function loginWithOAuth(
   payload: Payload,
   profile: OAuthProfile,
+  opts: { browserLocale?: Locale } = {},
   req?: PayloadRequest,
 ): Promise<OAuthLoginResult> {
   if (!profile.email) throw new AuthError("invalid_token", "OAuth profile has no email");
@@ -199,11 +214,31 @@ export async function loginWithOAuth(
     throw new AuthError("invalid_token", "OAuth email is not verified");
   }
 
-  const { identity, created } = await ensureIdentity(
+  const linkedAccount = await findIdentityByProvider(
     payload,
-    { email: profile.email, displayName: profile.name },
+    profile.provider,
+    profile.providerAccountId,
     req,
   );
+  let identity: Identity;
+  let created = false;
+  if (linkedAccount) {
+    identity = linkedAccount;
+  } else {
+    const byEmail = await findIdentityByEmail(payload, profile.email, req);
+    if (byEmail) {
+      identity = byEmail;
+    } else {
+      const ensured = await ensureIdentity(
+        payload,
+        { email: profile.email, displayName: profile.name, preferredLanguage: opts.browserLocale },
+        req,
+      );
+      identity = ensured.identity;
+      created = ensured.created;
+    }
+  }
+
   let linked = await linkProvider(
     payload,
     identity,

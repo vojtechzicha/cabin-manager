@@ -566,3 +566,148 @@ close → promote-winner.
 - **Per-poll VIP weighting** is supported in the algorithm but not yet surfaced
   in the organizer UI (call `rankWindows(…, vipWeights)` to use it).
 - Tally is poll-and-refresh, not realtime (PRD "near-live" — acceptable for now).
+
+---
+
+## 13. Security & data-integrity hardening (P0)
+
+Enforced at the **data layer** (collection access + hooks) so it holds for every
+write path — server actions, REST, and GraphQL — not just the UI.
+
+- **Memberships are non-relocatable / non-spoofable.** `trip` and `identity` are
+  immutable after creation (field `update` denied); a `beforeChange` hook enforces
+  one membership per `(trip, identity)`. Banking columns (`bankAccount`/`iban`)
+  are read-gated to self, organizers, and the banker (`bankingFieldRead`).
+- **Lifecycle/promoted state is service-owned.** `Trips.{phase, datePollState,
+  locationPollState, rosterState, financeState, dates, banker}` and
+  `Polls.{method, published, winnerOption, kind, trip}` deny direct writes
+  (`serviceOwnedField`) — they change only through the lifecycle/poll services
+  (which use `overrideAccess`), keeping the state machine + audit authoritative.
+- **Votes/options can't be forged.** A vote is only creatable for one of the
+  caller's **own** memberships (`votesAccess.create`); a Votes `beforeChange`
+  hook enforces option-visible + poll-published + poll-open + trip/poll/option/
+  membership consistency (and stamps `trip`/`poll` from the option). Poll-option
+  creation via the API is organizer-only — participant suggestions go through
+  `suggestOptionAction`, which stamps `suggestedBy`; moderation fields are locked.
+- **Cross-trip tampering blocked.** Actions assert the target membership/option
+  belongs to the authorized trip (`assertMembershipInTrip` / `assertOptionInTrip`);
+  poll close validates the winner is same-trip/same-poll/right-kind/visible/
+  published, and is idempotent. Reopening a date poll un-promotes `trip.dates`.
+- **Draft invisible / Archived immutable / Roster locks.** Draft trips are hidden
+  from non-organizers (`tripsAccess.read`). `src/collections/guards.ts` adds
+  `beforeChange`/`beforeDelete` hooks: an **archived** trip rejects all child
+  writes; a **locked** roster rejects new members, removals, and new invitations
+  (approvals are blocked in `approveJoinAction`). Trusted bulk ops opt out with
+  `context: { bypassLifecycleGuards: true }` (the seed reset uses this).
+- **Media ownership.** Uploads stamp an immutable `owner`; update/delete is
+  restricted to the owner or an admin.
+
+Covered by `tests/integration/{voting,guards}.test.ts` (vote on unpublished/
+hidden/closed rejected; foreign-trip winner rejected; idempotent close; reopen
+clears dates; archived/roster-lock writes rejected).
+
+- **Atomic multi-document writes.** `src/services/transaction.ts` (`withTransaction`)
+  wraps the multi-write service flows so they commit all-or-nothing: trip creation
+  (trip + organizer membership + banker), lifecycle write + audit
+  (`transitionPhase`/`transitionArea`), poll close/reopen + promote, banker
+  reassignment, and direct-invite creation (membership + invitation). Nested
+  services join the caller's transaction; a standalone call builds a local `req`
+  via `createLocalReq` and commits/rolls back itself.
+  - **Carve-out:** `redeemInvitation` is intentionally *not* wrapped — provisioning
+    an Identity + updating the membership inside one explicit transaction trips a
+    Payload/mongoose transaction-retry conflict with the membership hooks. Its
+    `acceptedAt` replay guard makes a partial redemption recoverable.
+
+**P0 hardening is complete.** Next: the **P1** product-flow items (open-join
+redirect, magic-link `next`, real email delivery + share intents, atomic
+one-time-token consumption, OAuth verification hardening, persisted
+`preferredLanguage`, PhaseBar close routing, voting-method/grid + optimal-date
+completeness) and the **P2** PRD mismatches.
+
+---
+
+## 14. P1 — broken product flows & voting correctness (done; real email skipped)
+
+**Auth flows**
+- **Open-join completes through sign-in:** `/join` now redirects an
+  unauthenticated visitor to `/sign-in?next=/join?token=…` (was bouncing to home,
+  dropping the token).
+- **Magic-link preserves `next`:** the sign-in form sends it → request route
+  validates (in-app paths only) → `mintMagicLink` embeds it → `/auth/magic`
+  redirects there. Chains open-join through a magic-link login.
+- **One-time tokens consumed atomically:** both magic-link (`consumeMagicLink`)
+  and invite (`redeemInvitation`) burn via a single conditional write
+  (`usedAt`/`acceptedAt` unset), so concurrent redemptions can't both succeed —
+  the loser modifies nothing. (The wrong-account check still runs before an
+  invite is claimed, so a mismatched attempt never burns it.)
+- **Invite delivery + share intents wired:** `createInviteAction` now calls
+  `deliverInvite` (fires the email through the adapter, returns share intents) and
+  the `InviteForm` renders WhatsApp/Telegram/Email/Copy/Share buttons. Direct
+  invites support **email / phone / Telegram handle / name** target types.
+  - **Skipped (by request):** swapping the `LoggingEmailAdapter` for a real
+    transactional provider (infra/env).
+- **OAuth hardening:** Microsoft emails are no longer blanket-trusted — verified
+  only via an explicit claim (`email_verified` / Entra `xms_edov`). Logins resolve
+  by **provider account id first** (then verified email, then create), so a linked
+  account is recognised even if its email changed and one provider account can't
+  attach to a second Identity.
+  - **Still open:** full OIDC **signature/issuer/audience** validation (JWKS via
+    `jose`). The id_token is fetched server-side over TLS in the code exchange, so
+    this is defense-in-depth rather than the primary trust boundary.
+- **`preferredLanguage` persisted & used:** `POST /auth/locale` saves the choice
+  to the Identity (the switcher posts there, keeping the cookie for immediacy);
+  magic-link and OAuth logins set the locale cookie from the saved preference; a
+  brand-new account defaults to the **browser** language (Accept-Language), not
+  always Czech.
+
+**Voting / lifecycle correctness**
+- PhaseBar no longer offers a generic poll "Close" — polls close from `/plan`
+  through winner selection. Close is validated + idempotent; reopening a date poll
+  clears the promoted `trip.dates`. The optimal-date algorithm sorts on the
+  **unrounded** score and uses the PRD tie-break order (earlier date → weekend).
+  The voting UI hides "best" until a vote exists, counts a voter as finished only
+  when every required cell is answered, and stars the **actual** chosen winner
+  after close (not always rank 1).
+
+**Not done (larger / out of scope this pass):** genuine near-live updates
+(polling/SSE — currently `revalidatePath`), the grid method as a distinct UI from
+the approval list, and merge-support for participant suggestions.
+
+---
+
+## 15. P0 hardening — second pass (gap closure)
+
+A review surfaced gaps in the first P0 pass; closed here (tests in
+`guards.test.ts`):
+
+- **Draft trips hidden everywhere.** `listMemberTrips` (overrideAccess) now
+  reproduces the `tripsAccess.read` draft rule — a participant no longer sees a
+  draft trip in the lobby/switcher.
+- **Archived is fully read-only.** `Trips` rejects edits and deletion while
+  archived (except the un-archive transition); a `rejectDeleteWhenArchived(slug)`
+  beforeDelete guard now covers trip-content / polls / poll-options / votes
+  (memberships already had one).
+- **Roster lock complete.** The membership guard now blocks not just *create* but
+  **status changes** (e.g. activating a pending invite) and **attendance** edits
+  once locked — diffed against `originalDoc` so finance/role edits stay allowed.
+- **Closed-poll options frozen.** `rejectIfPollClosed` (beforeChange) +
+  `rejectPollOptionDeleteWhenLocked` (beforeDelete) block editing/hiding/
+  promoting/deleting options after close; `setPollMethod` refuses a method change
+  on a closed poll.
+- **Direct-API create locked to services.** `trips`, `polls`, `poll-options`, and
+  `invitations` deny non-admin direct `create` — all creation flows through the
+  services (elevated), which set consistent relationships + invariants. This
+  removes orphan trips, pre-published / forged-winner polls, mismatched options,
+  and cross-trip invitations in one move.
+- **`setBanker` self-validates** the membership is active and in the trip.
+- **Invitation redemption is now transactional** — the atomic single-use claim +
+  membership activation share one transaction (Identity provisioning stays
+  outside, which was the source of the earlier retry conflict).
+
+**Deferred (documented limitation):** the membership `(trip, identity)`
+uniqueness is enforced by the beforeChange hook + the invite service, **not** a DB
+unique index — Payload's `indexes` API doesn't expose a `partialFilterExpression`,
+and a plain/sparse compound unique index can't allow multiple pending rows (null
+`identity`) per trip while forbidding duplicate claimed ones. A truly concurrent
+double-activation of the same identity into one trip remains theoretically
+possible; closing it needs a custom partial index via the mongoose adapter.

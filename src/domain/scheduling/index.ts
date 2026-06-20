@@ -145,14 +145,18 @@ export function rankDateOptions(
     };
   });
 
+  // PRD §8.2.1 tie-break order: higher (unrounded) score → more full-Yes → fewer
+  // If-needed → earlier start → weekend coverage. Sorting on the raw weighted sum
+  // (not the rounded 0–100 score) avoids spurious ties from rounding.
   scored.sort((a, b) => {
-    if (b.score !== a.score) return b.score - a.score;
+    if (b.raw !== a.raw) return b.raw - a.raw;
     if (b.yes !== a.yes) return b.yes - a.yes;
     if (a.ifNeeded !== b.ifNeeded) return a.ifNeeded - b.ifNeeded;
-    if (a.coversWeekend !== b.coversWeekend) return a.coversWeekend ? -1 : 1;
     const at = a._start ? a._start.getTime() : Infinity;
     const bt = b._start ? b._start.getTime() : Infinity;
-    return at - bt;
+    if (at !== bt) return at - bt;
+    if (a.coversWeekend !== b.coversWeekend) return a.coversWeekend ? -1 : 1;
+    return 0;
   });
 
   return scored.map(({ _start, ...rest }, i) => {

@@ -12,7 +12,11 @@ import type { Trip } from "@/payload-types";
 import { transitionAreaAction, transitionPhaseAction } from "../actions";
 
 const PHASES: TripPhase[] = ["draft", "ideation", "planning", "finances", "archived"];
-const AREAS: AreaKind[] = ["datePoll", "locationPoll", "roster", "finance"];
+// The date/location polls are NOT managed here: a generic "Close" would lock the
+// poll without selecting or promoting a winner. They're closed from the voting
+// screen (/plan), which routes through winner selection. PhaseBar manages only
+// the roster and finance locks.
+const AREAS: AreaKind[] = ["roster", "finance"];
 const AREA_FIELD: Record<AreaKind, keyof Trip> = {
   datePoll: "datePollState",
   locationPoll: "locationPollState",

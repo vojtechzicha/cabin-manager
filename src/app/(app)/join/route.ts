@@ -27,10 +27,10 @@ export async function GET(request: Request): Promise<Response> {
         : null;
 
     if (!identity) {
-      // Preserve the join token through sign-in so the user lands back here.
-      return NextResponse.redirect(
-        `${appUrl}/?join=login_required&token=${encodeURIComponent(token)}`,
-      );
+      // Send them to sign in, preserving this exact join URL as `next` so they
+      // land back here (and complete the join) once authenticated.
+      const next = `/join?token=${encodeURIComponent(token)}`;
+      return NextResponse.redirect(`${appUrl}/sign-in?next=${encodeURIComponent(next)}`);
     }
 
     const { needsApproval } = await requestOpenJoin(payload, token, identity);

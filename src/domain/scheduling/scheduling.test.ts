@@ -85,21 +85,22 @@ describe("rankDateOptions — tie-breakers", () => {
     expect(ranked.map((r) => r.rank)).toEqual([1, 2]);
   });
 
-  it("prefers a weekend-covering window on a full tie", () => {
+  it("prefers the earlier start before weekend coverage (PRD tie-break order)", () => {
     const ranked = rankDateOptions([
-      { id: "weekday", dateStart: "2026-07-06", dateEnd: "2026-07-09", votes: votes({ a: "yes" }) }, // Mon–Thu
-      { id: "weekend", dateStart: "2026-07-10", dateEnd: "2026-07-12", votes: votes({ a: "yes" }) }, // Fri–Sun
+      { id: "weekend", dateStart: "2026-07-10", dateEnd: "2026-07-12", votes: votes({ a: "yes" }) }, // Fri–Sun, later
+      { id: "weekday", dateStart: "2026-07-06", dateEnd: "2026-07-09", votes: votes({ a: "yes" }) }, // Mon–Thu, earlier
     ]);
-    expect(ranked.map((r) => r.id)).toEqual(["weekend", "weekday"]);
-    expect(ranked[0]?.coversWeekend).toBe(true);
+    // Earlier start wins even though the other covers a weekend.
+    expect(ranked.map((r) => r.id)).toEqual(["weekday", "weekend"]);
   });
 
-  it("prefers the earlier start when everything else ties", () => {
+  it("uses weekend coverage as the final tiebreaker when start dates tie", () => {
     const ranked = rankDateOptions([
-      { id: "later", dateStart: "2026-07-18", dateEnd: "2026-07-19", votes: votes({ a: "yes" }) }, // Sat–Sun
-      { id: "earlier", dateStart: "2026-07-11", dateEnd: "2026-07-12", votes: votes({ a: "yes" }) }, // Sat–Sun
+      { id: "fri-only", dateStart: "2026-07-10", dateEnd: "2026-07-10", votes: votes({ a: "yes" }) }, // Fri, no weekend
+      { id: "fri-sun", dateStart: "2026-07-10", dateEnd: "2026-07-12", votes: votes({ a: "yes" }) }, // Fri–Sun, weekend
     ]);
-    expect(ranked[0]?.id).toBe("earlier");
+    expect(ranked.map((r) => r.id)).toEqual(["fri-sun", "fri-only"]);
+    expect(ranked[0]?.coversWeekend).toBe(true);
   });
 });
 
