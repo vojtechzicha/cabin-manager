@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120">
+  <defs>
+    <!-- Cabin (neutral-default) green gradient, matching the app-icon tile. -->
+    <linearGradient id="g" x1="0" y1="0" x2="120" y2="120" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#43b389"/>
+      <stop offset="1" stop-color="#15623f"/>
+    </linearGradient>
+    <clipPath id="r"><rect width="120" height="120" rx="27"/></clipPath>
+  </defs>
+  <g clip-path="url(#r)">
+    <rect width="120" height="120" fill="url(#g)"/>
+  </g>
+  <!-- A-frame mark, scaled up vs the app icon so it stays legible at 16px. -->
+  <g fill="#ffffff" color="#ffffff" transform="translate(60 60) scale(1.78) translate(-24 -23.5)">
+    <path fill-rule="evenodd" clip-rule="evenodd" d="M24 4 L45.5 43 H2.5 Z M24 23 L34 43 H14 Z" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/>
+  </g>
+</svg>
