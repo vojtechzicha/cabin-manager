@@ -1,6 +1,10 @@
 import type { Metadata } from "next";
 import { Bricolage_Grotesque, Hanken_Grotesk, Space_Mono } from "next/font/google";
-import "./globals.css";
+
+import { getMessages } from "@/i18n";
+import { I18nProvider } from "@/i18n/react";
+import { getRequestLocale } from "@/i18n/server";
+import "../globals.css";
 
 // Display — warm serif-grotesque for headlines
 const bricolage = Bricolage_Grotesque({
@@ -27,7 +31,7 @@ const spaceMono = Space_Mono({
 export const metadata: Metadata = {
   title: "Chata — group trips, in your hand",
   description:
-    "One system, infinite trips. Every getaway gets its own identity from a photo and an accent — the components never change.",
+    "Run the whole life of a group trip — ideation, planning, and shared finances — as one collaborative app.",
 };
 
 export const viewport = {
@@ -36,15 +40,23 @@ export const viewport = {
   initialScale: 1,
 };
 
-export default function RootLayout({
-  children,
-}: Readonly<{ children: React.ReactNode }>) {
+// Root layout for the participant + organizer app. The (payload) admin route
+// group provides its own root layout, so there is intentionally no top-level
+// app/layout.tsx (see Next route-groups: multiple root layouts).
+export default async function AppLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  const locale = await getRequestLocale();
+  const messages = getMessages(locale);
+
   return (
     <html
-      lang="en"
+      lang={locale}
       className={`${bricolage.variable} ${hanken.variable} ${spaceMono.variable} h-full`}
     >
-      <body className="min-h-full">{children}</body>
+      <body className="min-h-full">
+        <I18nProvider locale={locale} messages={messages}>
+          {children}
+        </I18nProvider>
+      </body>
     </html>
   );
 }

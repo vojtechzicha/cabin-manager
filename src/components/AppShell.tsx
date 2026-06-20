@@ -2,22 +2,21 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { NavItem } from "@/lib/trips";
+import type { ReactNode } from "react";
+
 import { Avatar } from "./Avatar";
 
-export type TripChip = {
-  slug: string;
-  shortName: string;
-  accent: string;
-  photo: string;
-};
+export type NavItem = { key: string; href: string; label: string; icon: string };
+export type TripChip = { slug: string; shortName: string; accent: string; photo: string };
+export type ShellUser = { initials: string; name: string; role: string };
 
 type AppShellProps = {
   slug: string;
-  subdomain: string;
+  brand?: string;
   nav: NavItem[];
   trips: TripChip[];
-  children: React.ReactNode;
+  user: ShellUser;
+  children: ReactNode;
 };
 
 function useIsActive(slug: string) {
@@ -28,9 +27,13 @@ function useIsActive(slug: string) {
   };
 }
 
-export function AppShell({ slug, subdomain, nav, trips, children }: AppShellProps) {
+/**
+ * The mobile-first app shell: a left side-rail on desktop, a floating glass
+ * bottom nav on phones. Layout is fixed across trips; only the accent/photo
+ * theming (from the wrapping TripTheme) re-skins it (PRD §12).
+ */
+export function AppShell({ slug, brand = "Chata", nav, trips, user, children }: AppShellProps) {
   const isActive = useIsActive(slug);
-  const organizeHref = `/${slug}/organize`;
 
   return (
     <div className="min-h-screen">
@@ -38,7 +41,7 @@ export function AppShell({ slug, subdomain, nav, trips, children }: AppShellProp
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-line bg-card px-5 py-6 lg:flex">
         <Link href="/" className="mb-6 flex items-center gap-2.5 px-1">
           <span className="h-8 w-8 rounded-[10px] bg-photo" />
-          <span className="display text-xl font-extrabold tracking-tight">Chata</span>
+          <span className="display text-xl font-extrabold tracking-tight">{brand}</span>
         </Link>
 
         <div className="mono px-1 pb-2 text-[10px] uppercase tracking-[0.12em] text-sand">
@@ -52,7 +55,7 @@ export function AppShell({ slug, subdomain, nav, trips, children }: AppShellProp
                 key={t.slug}
                 href={`/${t.slug}`}
                 className="flex items-center gap-2.5 rounded-xl px-2.5 py-2 transition-colors hover:bg-paper"
-                style={active ? { background: "color-mix(in srgb, " + t.accent + " 16%, #fff)" } : undefined}
+                style={active ? { background: `color-mix(in srgb, ${t.accent} 16%, #fff)` } : undefined}
               >
                 <span className="h-6 w-6 shrink-0 rounded-lg" style={{ background: t.photo }} />
                 <span
@@ -88,25 +91,13 @@ export function AppShell({ slug, subdomain, nav, trips, children }: AppShellProp
               </Link>
             );
           })}
-          <Link
-            href={organizeHref}
-            className="mt-1 flex items-center gap-3 rounded-[9px] px-2.5 py-2 transition-colors"
-            style={
-              isActive(organizeHref)
-                ? { background: "var(--paper)", color: "var(--ink)", fontWeight: 700 }
-                : { color: "var(--muted)" }
-            }
-          >
-            <span className="w-5 text-center text-[15px]">🗂</span>
-            Organizer
-          </Link>
         </nav>
 
         <div className="mt-auto flex items-center gap-2.5 px-1 pt-4">
-          <Avatar id="TZ" size={32} />
+          <Avatar initials={user.initials} name={user.name} size={32} />
           <div>
-            <div className="text-xs font-semibold">Tomáš Z.</div>
-            <div className="text-[10px] text-sand">Organizer · {subdomain}</div>
+            <div className="text-xs font-semibold">{user.name}</div>
+            <div className="text-[10px] text-sand">{user.role}</div>
           </div>
         </div>
       </aside>

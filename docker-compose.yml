@@ -1,0 +1,30 @@
+# Local development MongoDB as a single-node replica set.
+#
+# A replica set (not a standalone) is required because Payload's finance flows
+# rely on multi-document transactions (build.md §0.1), which MongoDB only offers
+# on a replica set. The healthcheck initiates the set on first boot, so
+# `docker compose up -d --wait mongo` yields a transaction-capable database with
+# no manual `rs.initiate()` step.
+services:
+  mongo:
+    image: mongo:8.0
+    container_name: chata-mongo
+    command: ["--replSet", "rs0", "--bind_ip_all"]
+    # Host port 27018 (not the default 27017) to avoid colliding with other
+    # local Mongo instances. The container still listens on 27017 internally.
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: >
+        echo "try { rs.status().ok } catch (e) {
+          rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'localhost:27017' }] }).ok
+        }" | mongosh --quiet
+      interval: 5s
+      timeout: 30s
+      start_period: 5s
+      retries: 30
+
+volumes:
+  mongo-data:

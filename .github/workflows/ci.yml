@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      # Integration tests spin up their own ephemeral Mongo replica set via
+      # mongodb-memory-server and set DATABASE_URI at runtime; PAYLOAD_SECRET is
+      # the only static value the Payload config needs when it is imported.
+      PAYLOAD_SECRET: ci-secret-not-used-in-production
+      APP_URL: http://localhost:3000
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint (incl. architecture boundaries)
+        run: pnpm lint
+
+      - name: Unit tests (domain / payments, no DB)
+        run: pnpm test:unit
+
+      - name: Integration tests (ephemeral Mongo replica set)
+        run: pnpm test:int

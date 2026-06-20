@@ -16,9 +16,12 @@
   --muted: #756f64;
   --ink: #1c1b18;
 
-  /* semantic */
+  /* semantic status — finance & roster states share one vocabulary */
+  --settled: #2f9e73;
   --confirmed: #2f9e73;
   --due: #e8a93b;
+  --provisional: #e8a93b;
+  --owing: #d8503f;
   --overdue: #d8503f;
   --info: #3f86d8;
 
@@ -38,8 +41,11 @@
   --color-muted: var(--muted);
   --color-ink: var(--ink);
 
+  --color-settled: var(--settled);
   --color-confirmed: var(--confirmed);
   --color-due: var(--due);
+  --color-provisional: var(--provisional);
+  --color-owing: var(--owing);
   --color-overdue: var(--overdue);
   --color-info: var(--info);
 

@@ -1,70 +1,61 @@
-# Chata — group-trip prototype
+# Chata — zicha.travel
 
-A Next.js prototype of the **Chata** design system: _one app, re-skinned by photo
-and accent for every trip._ Built from the `Chata Screens` / `Chata Design System`
-boards. This is a clickable, fully-responsive prototype with mock data — the
-intended next step is to swap the data layer for a real backend.
+Run the whole life of a group trip — **ideation → planning → finances** — as one
+collaborative, mobile-first, multilingual app. See [`docs/prd.md`](docs/prd.md)
+for the product spec and [`docs/build.md`](docs/build.md) for the engineering
+tickets.
 
-```bash
-npm install
-npm run dev      # http://localhost:3000
-npm run build    # all routes prerender (SSG)
-```
-
-## The idea
-
-A trip is deployed to its own subdomain and themed by **three knobs only**: a
-background photo, an accent colour sampled from it, and an icon. Layout, type,
-spacing and components never change — so there is exactly one system to maintain.
-
-Three seeded trips show the same screens re-skinned:
-
-| Trip | Accent | Route |
-| --- | --- | --- |
-| Summer Cabin | sage / forest | `/cabin` |
-| Road to LA 2028 | cobalt / gold | `/la2028` |
-| Ride to the Baltic | sunset coral | `/baltic` |
-
-## Screens
-
-Consumer app (mobile-first, responsive) — bottom glass nav on phones, left
-side-rail on desktop:
-
-- `/[trip]` — **Dashboard**: hero, countdown, next-up, stat grid, trip pulse
-- `/[trip]/plan` — **Voting**: optimal-date suggestion, vote bars, start point
-- `/[trip]/stay` — **Rooms & beds**: claim a bed before someone else does
-- `/[trip]/money` — **Finances**: balances, expenses, deposits, QR settle
-- `/[trip]/info` — **Destination**: facts, getting there, good to know
-
-Organizer (desktop-first, collapses to one column on mobile):
-
-- `/[trip]/organize` — **The organizer's desk**: open loops + assistant nudges
-
-Plus `/` — a landing / trip picker.
-
-## How the theming works
-
-Theming is driven entirely by four CSS variables set once per trip:
-
-```
---accent  --accent-ink  --accent-soft  --photo
-```
-
-`src/lib/theme.ts` turns a trip's `Theme` into those variables; the `[trip]`
-layout spreads them onto a wrapper, and every `bg-accent`, `.bg-photo`, glass
-tint, etc. below re-skins automatically. Tailwind's `@theme inline` (in
-`globals.css`) maps the warm neutral spine and the accent utilities to those
-variables.
-
-## The seam (turning this into the real thing)
-
-All data lives in **`src/lib/trips.ts`** as plain typed objects, behind
-`getTrip()` / `TRIPS`. Replace those helpers with database / API calls and the
-screens stay untouched. Hero "photos" are gradient stand-ins — drop in real
-images (and resample the accent) without changing layout.
+This repository currently implements **Epic 0 — Foundation & architecture**.
 
 ## Stack
 
-Next.js 16 (App Router, RSC) · TypeScript · Tailwind v4 · `next/font`
-(Bricolage Grotesque / Hanken Grotesk / Space Mono). No client state beyond the
-nav active-state; every page is a static Server Component.
+- **Next.js 16** (App Router, Turbopack, React 19 + React Compiler)
+- **Payload CMS 3.85** embedded in the app (`/admin`, REST + GraphQL)
+- **MongoDB** via `@payloadcms/db-mongodb`, run as a **replica set** (transactions
+  are required for finance integrity)
+- **TypeScript** strict + `noUncheckedIndexedAccess`
+- **Tailwind v4** design system (glass-morphism, per-trip theming)
+- **Vitest** (unit + integration) · **eslint-plugin-boundaries** (architecture)
+
+Architecture and layer rules: [`ARCHITECTURE.md`](ARCHITECTURE.md).
+
+## Getting started
+
+```bash
+pnpm install
+cp .env.example .env            # then set PAYLOAD_SECRET (openssl rand -base64 32)
+pnpm mongo:up                   # docker: single-node Mongo replica set on :27018
+pnpm dev                        # http://localhost:3000  ·  admin at /admin
+pnpm seed                       # admin@chata.test / chata-admin-123 + sample data
+```
+
+Health check: `GET /healthz` reports DB connectivity and transaction support.
+
+## Scripts
+
+| Command | What it does |
+| --- | --- |
+| `pnpm dev` / `pnpm build` | Next dev / production build |
+| `pnpm mongo:up` / `pnpm mongo:down` | Start/stop the local Mongo replica set |
+| `pnpm typecheck` | `tsc --noEmit` (strict) |
+| `pnpm lint` | ESLint incl. architecture boundaries |
+| `pnpm test` | Unit (no DB) + integration (ephemeral Mongo RS) |
+| `pnpm test:e2e` | Playwright smoke + screenshots (needs `pnpm mongo:up`) |
+| `pnpm generate:types` | Regenerate `src/payload-types.ts` |
+| `pnpm seed` | Idempotent dev seed |
+
+## Layout
+
+```
+src/
+  domain/      pure money/state math (settlement, scheduling, lifecycle)
+  payments/    pure SPAYD QR + CZ account↔IBAN
+  i18n/        locales, catalogs (cs/en), formatters, recipient-language messages
+  collections/ Payload schema + access control
+  access/      reusable access predicates
+  services/    use-case layer (e.g. audit log)
+  components/   React design system
+  app/(payload) admin · app/(app) frontend
+  lib/         universal leaf utilities (env, …)
+archive/       frozen prototype — design + screen reference for later epics
+```
