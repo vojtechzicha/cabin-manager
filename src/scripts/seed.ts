@@ -14,6 +14,7 @@ import { AuditAction, auditEntriesForTrip, recordAudit } from "@/services/audit"
 import { ensureIdentity } from "@/services/identity";
 import { createTrip } from "@/services/trips";
 import { createDirectInvite } from "@/services/invitations";
+import { addOption, castVote, publishPoll, setPollMethod, type AvailabilityValue } from "@/services/polls";
 import { upsertTripContent } from "@/services/trip-content";
 
 const ADMIN_EMAIL = "admin@chata.test";
@@ -54,6 +55,9 @@ for (const slug of [
   "trip-content",
   "memberships",
   "invitations",
+  "polls",
+  "poll-options",
+  "votes",
   "login-tokens",
   "health-checks",
   "audit-entries",
@@ -173,7 +177,57 @@ if (existingTrip.docs.length === 0) {
     notes: "Trash goes out Sunday morning. Leave the cabin as you found it.",
   });
 
+  // Sample voting data (Epic 3): a published grid date poll + a location poll,
+  // a handful of extra voters, and votes so the optimal panel has something to
+  // rank.
+  const tripId = String(trip.id);
+  const voterNames = ["Klára", "Adam", "Jana", "Martin"];
+  const voters: string[] = [];
+  for (const displayName of voterNames) {
+    const mem = await payload.create({
+      collection: "memberships",
+      overrideAccess: true,
+      data: { trip: tripId, displayName, role: "participant", status: "active" },
+    });
+    voters.push(String(mem.id));
+  }
+
+  await setPollMethod(payload, tripId, "date", "grid");
+  const windows: [string, string][] = [
+    ["2026-06-21", "2026-06-28"],
+    ["2026-06-28", "2026-07-05"],
+    ["2026-07-05", "2026-07-12"],
+  ];
+  const dateOpts = [];
+  for (let i = 0; i < windows.length; i++) {
+    dateOpts.push(
+      await addOption(payload, { tripId, kind: "date", dateStart: windows[i]![0], dateEnd: windows[i]![1], order: i }),
+    );
+  }
+  await publishPoll(payload, tripId, "date");
+  // rows are per-voter availability across the three windows
+  const grid: AvailabilityValue[][] = [
+    ["yes", "yes", "ifneeded"],
+    ["yes", "no", "yes"],
+    ["ifneeded", "no", "no"],
+    ["yes", "yes", "yes"],
+  ];
+  for (let v = 0; v < voters.length; v++) {
+    for (let w = 0; w < dateOpts.length; w++) {
+      await castVote(payload, { tripId, kind: "date", membershipId: voters[v]!, optionId: String(dateOpts[w]!.id), value: grid[v]![w]! });
+    }
+  }
+
+  const places = ["Beskydy", "Krkonoše"];
+  const locOpts = [];
+  for (const label of places) locOpts.push(await addOption(payload, { tripId, kind: "location", label }));
+  await publishPoll(payload, tripId, "location");
+  await castVote(payload, { tripId, kind: "location", membershipId: voters[0]!, optionId: String(locOpts[0]!.id), value: "yes" });
+  await castVote(payload, { tripId, kind: "location", membershipId: voters[1]!, optionId: String(locOpts[0]!.id), value: "yes" });
+  await castVote(payload, { tripId, kind: "location", membershipId: voters[2]!, optionId: String(locOpts[1]!.id), value: "yes" });
+
   payload.logger.info(`created demo trip "${trip.name}" organized by ${ORGANIZER_EMAIL}`);
+  payload.logger.info(`seeded voting: ${dateOpts.length} date windows, ${locOpts.length} places, ${voters.length} voters`);
   payload.logger.info(`pending invite for ${INVITEE_EMAIL}: ${invite.url}`);
 } else {
   payload.logger.info("demo trip already present");

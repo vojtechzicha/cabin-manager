@@ -13,6 +13,9 @@ import { Trips } from "@/collections/Trips";
 import { TripContent } from "@/collections/TripContent";
 import { Memberships } from "@/collections/Memberships";
 import { Invitations } from "@/collections/Invitations";
+import { Polls } from "@/collections/Polls";
+import { PollOptions } from "@/collections/PollOptions";
+import { Votes } from "@/collections/Votes";
 import { LoginTokens } from "@/collections/LoginTokens";
 import { HealthChecks } from "@/collections/HealthChecks";
 import { AuditEntries } from "@/collections/AuditEntries";
@@ -33,6 +36,9 @@ export default buildConfig({
     TripContent,
     Memberships,
     Invitations,
+    Polls,
+    PollOptions,
+    Votes,
     LoginTokens,
     HealthChecks,
     AuditEntries,

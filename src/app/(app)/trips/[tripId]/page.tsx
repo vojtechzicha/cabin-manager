@@ -167,7 +167,7 @@ export default async function TripDashboardPage({
 }) {
   const { tripId } = await params;
   const locale = await getRequestLocale();
-  const { m } = getTranslator(locale);
+  const { m, t } = getTranslator(locale);
   const { payload, identity } = await getCurrentIdentity();
 
   const trip = (await payload.findByID({
@@ -214,7 +214,7 @@ export default async function TripDashboardPage({
         daysToGo={days ?? 0}
         daysToGoLabel={days != null ? m.console.dashDates : m.console.dashDatesTbd}
         crowd={{ members: crowd, extra: Math.max(0, active.length - crowd.length) }}
-        goingLabel={m.console.dashGoing.replace("{count}", String(active.length))}
+        goingLabel={t((mm) => mm.console.dashGoing, { count: active.length })}
         ringColor="var(--accent)"
       />
 
@@ -239,6 +239,14 @@ export default async function TripDashboardPage({
               sub={confirmed > 0 ? `${confirmed} ${m.people.confirmed.toLowerCase()}` : undefined}
               href={isOrganizer ? `/trips/${tripId}/people` : undefined}
             />
+            {areas.voting ? (
+              <StatCard
+                icon="🗳"
+                label={m.console.areaVoting}
+                value={trip.datePollState === "closed" ? m.voting.dashLocked : m.voting.dashOpen}
+                href={`/trips/${tripId}/plan`}
+              />
+            ) : null}
             {areas.sleeping ? (
               <StatCard icon="🛏" label={m.console.areaSleeping} value={m.console.dashSetup} muted />
             ) : null}

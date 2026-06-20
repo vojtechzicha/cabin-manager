@@ -96,7 +96,7 @@ function LobbyBackdrop() {
 
 export default async function Home() {
   const locale = await getRequestLocale();
-  const { m } = getTranslator(locale);
+  const { m, t } = getTranslator(locale);
   const { payload, identity } = await getCurrentIdentity();
 
   // ── Signed-out lobby ──────────────────────────────────────────────────────
@@ -310,7 +310,7 @@ export default async function Home() {
         </header>
         {active.length > 0 ? (
           <div className="mt-1.5 pl-14 text-[14px] text-white/60">
-            {m.home.tripsInMotion.replace("{count}", String(active.length))}
+            {t((mm) => mm.home.tripsInMotion, { count: active.length })}
           </div>
         ) : null}
 

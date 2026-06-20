@@ -31,7 +31,8 @@ export function useI18n() {
   return {
     locale,
     m: messages,
-    t: (select: MessageSelector, params?: MessageParams) => interpolate(select(messages), params),
+    t: (select: MessageSelector, params?: MessageParams) =>
+      interpolate(select(messages), params, locale),
     format: getFormatters(locale),
   };
 }

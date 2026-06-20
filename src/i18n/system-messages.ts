@@ -13,7 +13,7 @@ export function renderSystemMessage(
   select: MessageSelector,
   params?: MessageParams,
 ): string {
-  return interpolate(select(getMessages(recipientLocale)), params);
+  return interpolate(select(getMessages(recipientLocale)), params, recipientLocale);
 }
 
 /** Formatters bound to the recipient's locale, for amounts/dates inside messages. */

@@ -23,7 +23,22 @@ import {
 import { upsertTripContent, type TripContentData } from "@/services/trip-content";
 import { deriveIban, isValidCzAccount, isValidIban, normalizeIban } from "@/services/banking";
 import {
+  addOption,
+  castVote,
+  closeDatePoll,
+  closeLocationPoll,
+  moderateOption,
+  publishPoll,
+  removeOption,
+  reopenPoll,
+  setPollMethod,
+  type AvailabilityValue,
+  type PollKind,
+  type PollMethod,
+} from "@/services/polls";
+import {
   createTrip,
+  getMembership,
   identityOrganizesTrip,
   setBanker,
   setMembershipRole,
@@ -65,6 +80,19 @@ async function requireOrganizer(tripId: string): Promise<{ payload: Payload; ide
     throw new Error("Not authorized: organizers only.");
   }
   return { payload, identity };
+}
+
+/** Authorize the current Identity as an active member of `tripId`, or throw. */
+async function requireMember(
+  tripId: string,
+): Promise<{ payload: Payload; identity: Identity; membershipId: string }> {
+  const { payload, identity } = await getCurrentIdentity();
+  if (!identity) redirect(`/sign-in?next=${encodeURIComponent(`/trips/${tripId}`)}`);
+  const membership = await getMembership(payload, tripId, identity.id);
+  if (!membership || membership.status !== "active") {
+    throw new Error("Not authorized: trip members only.");
+  }
+  return { payload, identity, membershipId: String(membership.id) };
 }
 
 const str = (v: FormDataEntryValue | null): string | undefined => {
@@ -303,4 +331,111 @@ export async function saveTripInfoAction(tripId: string, formData: FormData): Pr
   await upsertTripContent(payload, tripId, data);
   revalidatePath(`/trips/${tripId}/info`);
   redirect(`/trips/${tripId}/info`);
+}
+
+// --- Voting (T-302/303/305) -------------------------------------------------
+
+const VOTE_VALUES = new Set<AvailabilityValue>(["yes", "ifneeded", "no"]);
+
+/** Cast (or update) the caller's own vote on an option. Members only. */
+export async function castVoteAction(
+  tripId: string,
+  kind: PollKind,
+  optionId: string,
+  value: AvailabilityValue,
+): Promise<void> {
+  if (!VOTE_VALUES.has(value)) throw new Error("Invalid vote value.");
+  const { payload, membershipId } = await requireMember(tripId);
+  await castVote(payload, { tripId, kind, membershipId, optionId, value });
+  revalidatePath(`/trips/${tripId}/plan`);
+}
+
+/** A participant suggests a new candidate option (flagged as suggested). */
+export async function suggestOptionAction(
+  tripId: string,
+  kind: PollKind,
+  formData: FormData,
+): Promise<void> {
+  const { payload, membershipId } = await requireMember(tripId);
+  await addOption(payload, {
+    tripId,
+    kind,
+    dateStart: str(formData.get("dateStart")) ?? null,
+    dateEnd: str(formData.get("dateEnd")) ?? null,
+    label: str(formData.get("label")) ?? null,
+    suggestedByMembershipId: membershipId,
+  });
+  revalidatePath(`/trips/${tripId}/plan`);
+}
+
+/** Organizer seeds an official candidate option. */
+export async function addOptionAction(
+  tripId: string,
+  kind: PollKind,
+  formData: FormData,
+): Promise<void> {
+  const { payload } = await requireOrganizer(tripId);
+  await addOption(payload, {
+    tripId,
+    kind,
+    dateStart: str(formData.get("dateStart")) ?? null,
+    dateEnd: str(formData.get("dateEnd")) ?? null,
+    label: str(formData.get("label")) ?? null,
+  });
+  revalidatePath(`/trips/${tripId}/plan`);
+}
+
+export async function removeOptionAction(tripId: string, optionId: string): Promise<void> {
+  const { payload } = await requireOrganizer(tripId);
+  await removeOption(payload, optionId);
+  revalidatePath(`/trips/${tripId}/plan`);
+}
+
+export async function moderateOptionAction(
+  tripId: string,
+  optionId: string,
+  action: "promote" | "hide" | "unhide",
+): Promise<void> {
+  const { payload } = await requireOrganizer(tripId);
+  await moderateOption(payload, optionId, action);
+  revalidatePath(`/trips/${tripId}/plan`);
+}
+
+export async function setPollMethodAction(
+  tripId: string,
+  kind: PollKind,
+  method: PollMethod,
+): Promise<void> {
+  const { payload } = await requireOrganizer(tripId);
+  await setPollMethod(payload, tripId, kind, method);
+  revalidatePath(`/trips/${tripId}/plan`);
+}
+
+export async function publishPollAction(tripId: string, kind: PollKind): Promise<void> {
+  const { payload } = await requireOrganizer(tripId);
+  await publishPoll(payload, tripId, kind);
+  revalidatePath(`/trips/${tripId}/plan`);
+}
+
+/** Close a poll and promote its winner onto the trip (dates or location). */
+export async function closePollAction(
+  tripId: string,
+  kind: PollKind,
+  winnerOptionId: string,
+): Promise<void> {
+  const { payload, identity } = await requireOrganizer(tripId);
+  if (kind === "date") {
+    await closeDatePoll(payload, tripId, { actor: identity.id, winnerOptionId });
+  } else {
+    await closeLocationPoll(payload, tripId, { actor: identity.id, winnerOptionId });
+  }
+  revalidatePath(`/trips/${tripId}/plan`);
+  revalidatePath(`/trips/${tripId}`);
+}
+
+export async function reopenPollAction(tripId: string, kind: PollKind): Promise<void> {
+  const { payload, identity } = await requireOrganizer(tripId);
+  await reopenPoll(payload, tripId, kind, { actor: identity.id });
+  revalidatePath(`/trips/${tripId}/plan`);
+  revalidatePath(`/trips/${tripId}`);
 }

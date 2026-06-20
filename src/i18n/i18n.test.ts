@@ -44,6 +44,25 @@ describe("translator switches all chrome by locale", () => {
       "Hi Jana, you still owe 400 Kč on “Cabin”.",
     );
   });
+
+  it("applies correct Czech plural forms (1 / 2–4 / 0,5+)", () => {
+    const cs = getTranslator("cs");
+    const votes = (n: number) => cs.t((m) => m.voting.votesCount, { count: n });
+    expect(votes(0)).toBe("0 hlasů");
+    expect(votes(1)).toBe("1 hlas");
+    expect(votes(2)).toBe("2 hlasy");
+    expect(votes(4)).toBe("4 hlasy");
+    expect(votes(5)).toBe("5 hlasů");
+    expect(votes(11)).toBe("11 hlasů");
+  });
+
+  it("applies English one/other plural forms", () => {
+    const en = getTranslator("en");
+    const votes = (n: number) => en.t((m) => m.voting.votesCount, { count: n });
+    expect(votes(1)).toBe("1 vote");
+    expect(votes(0)).toBe("0 votes");
+    expect(votes(3)).toBe("3 votes");
+  });
 });
 
 describe("system messages render in the recipient's language", () => {

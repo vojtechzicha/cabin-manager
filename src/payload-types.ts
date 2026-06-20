@@ -72,6 +72,9 @@ export interface Config {
     'trip-content': TripContent;
     memberships: Membership;
     invitations: Invitation;
+    polls: Poll;
+    'poll-options': PollOption;
+    votes: Vote;
     'login-tokens': LoginToken;
     'health-checks': HealthCheck;
     'audit-entries': AuditEntry;
@@ -88,6 +91,9 @@ export interface Config {
     'trip-content': TripContentSelect<false> | TripContentSelect<true>;
     memberships: MembershipsSelect<false> | MembershipsSelect<true>;
     invitations: InvitationsSelect<false> | InvitationsSelect<true>;
+    polls: PollsSelect<false> | PollsSelect<true>;
+    'poll-options': PollOptionsSelect<false> | PollOptionsSelect<true>;
+    votes: VotesSelect<false> | VotesSelect<true>;
     'login-tokens': LoginTokensSelect<false> | LoginTokensSelect<true>;
     'health-checks': HealthChecksSelect<false> | HealthChecksSelect<true>;
     'audit-entries': AuditEntriesSelect<false> | AuditEntriesSelect<true>;
@@ -523,6 +529,76 @@ export interface Invitation {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "polls".
+ */
+export interface Poll {
+  id: string;
+  trip: string | Trip;
+  kind: 'date' | 'location';
+  /**
+   * Date polls use approval or grid; location polls use single or approval.
+   */
+  method?: ('approval' | 'grid' | 'single') | null;
+  /**
+   * Draft while the organizer seeds options; published opens voting.
+   */
+  published?: boolean | null;
+  /**
+   * Set when the poll is closed and the winner is promoted to the trip.
+   */
+  winnerOption?: (string | null) | PollOption;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "poll-options".
+ */
+export interface PollOption {
+  id: string;
+  poll: string | Poll;
+  trip: string | Trip;
+  kind: 'date' | 'location';
+  /**
+   * Date polls: window start.
+   */
+  dateStart?: string | null;
+  /**
+   * Date polls: window end.
+   */
+  dateEnd?: string | null;
+  /**
+   * Location polls: the place; also a display label for date windows.
+   */
+  label?: string | null;
+  /**
+   * The participant who suggested it; null = organizer-seeded.
+   */
+  suggestedBy?: (string | null) | Membership;
+  /**
+   * Moderated out of the vote.
+   */
+  hidden?: boolean | null;
+  order?: number | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "votes".
+ */
+export interface Vote {
+  id: string;
+  poll: string | Poll;
+  trip: string | Trip;
+  option: string | PollOption;
+  membership: string | Membership;
+  value: 'yes' | 'ifneeded' | 'no';
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "login-tokens".
  */
 export interface LoginToken {
@@ -630,6 +706,18 @@ export interface PayloadLockedDocument {
     | ({
         relationTo: 'invitations';
         value: string | Invitation;
+      } | null)
+    | ({
+        relationTo: 'polls';
+        value: string | Poll;
+      } | null)
+    | ({
+        relationTo: 'poll-options';
+        value: string | PollOption;
+      } | null)
+    | ({
+        relationTo: 'votes';
+        value: string | Vote;
       } | null)
     | ({
         relationTo: 'login-tokens';
@@ -895,6 +983,49 @@ export interface InvitationsSelect<T extends boolean = true> {
   source?: T;
   expiresAt?: T;
   acceptedAt?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "polls_select".
+ */
+export interface PollsSelect<T extends boolean = true> {
+  trip?: T;
+  kind?: T;
+  method?: T;
+  published?: T;
+  winnerOption?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "poll-options_select".
+ */
+export interface PollOptionsSelect<T extends boolean = true> {
+  poll?: T;
+  trip?: T;
+  kind?: T;
+  dateStart?: T;
+  dateEnd?: T;
+  label?: T;
+  suggestedBy?: T;
+  hidden?: T;
+  order?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "votes_select".
+ */
+export interface VotesSelect<T extends boolean = true> {
+  poll?: T;
+  trip?: T;
+  option?: T;
+  membership?: T;
+  value?: T;
   updatedAt?: T;
   createdAt?: T;
 }

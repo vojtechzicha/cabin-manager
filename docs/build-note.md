@@ -501,3 +501,68 @@ Deliberately **not** built (design shows them, features don't exist yet):
 - Empty-state **"Paste invite link"** box and the desktop lobby **search** field.
 - Dashboard's **"Next up"** CTA, balances/QR-settle, bed grids — Epics 4/5 (the
   stat grid still shows muted "set up later" cards, see §10).
+
+---
+
+## 12. Epic 3 (voting — date & location polls) — what exists now
+
+Implements PRD §8.2 / tickets T-301→T-305. Both polls (date + location) with
+approval, availability-grid, and single-choice methods; live tally; the
+optimal-date algorithm; participant suggestions + organizer moderation; and
+close → promote-winner.
+
+### Domain & services (the seam)
+- **`domain/scheduling/`** (pure, T-304): `rankDateOptions(options, {vipWeights,
+  voterIds})` scores each window (Yes 1.0 / If-needed 0.5 / No 0), normalised
+  0–100 against the **active roster** (non-voters count against a window), with
+  tie-breakers (more full-Yes → fewer If-needed → covers a weekend → earlier).
+  Heavily unit-tested (`scheduling.test.ts`). The app may not import `@/domain`
+  directly — types re-export through `@/services/polls`.
+- **`services/polls.ts`**: `getOrCreatePoll`, `listOptions/listVotes`,
+  `rankWindows` (wires options+votes+roster into the domain), `addOption`,
+  `moderateOption` (promote/hide/unhide), `setPollMethod`, `publishPoll`,
+  `castVote` (upsert; single-choice clears the member's other votes),
+  `closeDatePoll`/`closeLocationPoll` (promote winner + lifecycle close),
+  `reopenPoll`. Same `(payload, …, req?)` convention as the rest.
+
+### Collections (`src/collections/`)
+- **`Polls`** — one row per `(trip, kind)` (unique). Holds `method` and
+  `winnerOption`; `published` gates participant visibility (Draft → Open). **The
+  open/closed lock stays on the Trip** (`datePollState`/`locationPollState`,
+  lifecycle-owned) — Poll has no `state` field, deliberately (closing the date
+  poll is the settlement gate, §2/§10).
+- **`PollOptions`** — date window (`dateStart/dateEnd`) or location `label`;
+  `suggestedBy` flags participant suggestions; `hidden` for moderation; `trip`
+  denormalised for access scoping.
+- **`Votes`** — `(option, membership)` unique; `value: yes|ifneeded|no`.
+  **Public to read across the trip, self-only to write** (`votesAccess` `or`s
+  organizer scope with the caller's own membership ids — new `myMembershipIds`
+  predicate). Run `pnpm generate:types` after touching these.
+
+### Frontend (`src/app/(app)/trips/[tripId]/plan/`)
+- One server page renders all states with the **bound-server-action-form**
+  pattern (like `PhaseBar`, no client JS): participant voting (3-state Yes/If/No
+  rows for approval+grid, single-choice pills for location), the **availability
+  heatmap** (`?dview=all`), and the organizer console (status chips, method
+  toggle, candidate manager + suggestion moderation, the ranked optimal panel
+  with "Use this", close + confirmation, and reopen). Tally is **near-live** via
+  `revalidatePath` on each vote — not websockets.
+- Nav gains a **Plan** entry (gated on `enabledAreas.voting`) and the dashboard a
+  voting StatCard. New `voting` i18n group in both catalogs.
+- Seed adds a published grid date poll + location poll with sample voters/votes.
+
+### i18n plural support (added here)
+- `interpolate()` is now **locale-aware** and supports ICU-style plural blocks
+  `{count, plural, one {…} few {…} other {…}}` via `Intl.PluralRules`, with `#`
+  for the number. Czech now inflects correctly (1 hlas / 2 hlasy / 5 hlasů); the
+  same was applied to existing count strings (`tripsInMotion`, `dashGoing`).
+  Render count strings through `t(...)` / `interpolate(..., locale)`, **not**
+  `String.replace` (which skips plural selection). Covered in `i18n.test.ts`.
+
+### Not done / deferred
+- **Merge** of a duplicate suggestion (the design's 3rd moderation action) — only
+  Promote/Hide are wired; merging needs a target-picker. Suggestions can be
+  hidden instead.
+- **Per-poll VIP weighting** is supported in the algorithm but not yet surfaced
+  in the organizer UI (call `rankWindows(…, vipWeights)` to use it).
+- Tally is poll-and-refresh, not realtime (PRD "near-live" — acceptable for now).

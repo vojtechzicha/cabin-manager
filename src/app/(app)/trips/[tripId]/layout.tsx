@@ -72,8 +72,10 @@ export default async function TripConsoleLayout({
 
   const theme = themeForTrip(trip.theme?.color, coverUrlOf(trip));
   const base = `/trips/${tripId}`;
+  const areas = trip.enabledAreas ?? {};
   const nav: NavItem[] = [
     { key: "overview", href: base, label: m.console.overview, icon: "⌂" },
+    ...(areas.voting ? [{ key: "plan", href: `${base}/plan`, label: m.nav.plan, icon: "🗳" }] : []),
     { key: "info", href: `${base}/info`, label: m.console.info, icon: "ⓘ" },
     ...(isOrganizer
       ? [

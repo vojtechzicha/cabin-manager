@@ -25,6 +25,7 @@ export type MembershipRole = (typeof ORGANIZER_ROLES)[number] | "participant";
 
 /** A trip-membership as seen with `depth: 0` (relationships are raw ids). */
 interface MembershipLite {
+  id: string;
   trip: string;
   role: MembershipRole;
   isBanker?: boolean | null;
@@ -64,6 +65,7 @@ async function activeMemberships(req: PayloadRequest): Promise<MembershipLite[]>
     req,
   });
   return res.docs.map((d) => ({
+    id: String(d.id),
     trip: String(d.trip),
     role: d.role as MembershipRole,
     isBanker: d.isBanker,
@@ -85,6 +87,15 @@ export async function organizerTripIds(req: PayloadRequest): Promise<string[]> {
 /** Trip ids the caller is the banker for. */
 export async function bankerTripIds(req: PayloadRequest): Promise<string[]> {
   return (await activeMemberships(req)).filter((m) => m.isBanker).map((m) => m.trip);
+}
+
+/**
+ * The caller's own active membership ids. Used to scope self-writes (e.g. a
+ * participant may edit only *their own* votes — Votes are public to read but
+ * personal to write).
+ */
+export async function myMembershipIds(req: PayloadRequest): Promise<string[]> {
+  return (await activeMemberships(req)).map((m) => m.id);
 }
 
 // --- Boolean predicates (single-trip checks) --------------------------------

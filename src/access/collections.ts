@@ -11,9 +11,11 @@
 import type { Access, Where } from "payload";
 
 import {
+  isMemberOf,
   isOrganizerOf,
   isPlatformAdminReq,
   memberTripIds,
+  myMembershipIds,
   organizerTripIds,
 } from "./predicates";
 
@@ -137,6 +139,101 @@ export const tripContentAccess = {
     if (isPlatformAdminReq(req)) return true;
     if (!userId(req)) return false;
     return { trip: { in: await organizerTripIds(req) } };
+  }) satisfies Access,
+};
+
+// --- Polls (date & location voting, T-301) ----------------------------------
+
+/**
+ * A poll (one per trip per kind) is organizer-managed: every member reads it,
+ * only organizers create/configure/close it. Mirrors {@link tripContentAccess}.
+ */
+export const pollsAccess = {
+  read: (async ({ req }) => {
+    if (isPlatformAdminReq(req)) return true;
+    if (!userId(req)) return false;
+    return { trip: { in: await memberTripIds(req) } };
+  }) satisfies Access,
+  create: (async ({ req, data }) => {
+    if (isPlatformAdminReq(req)) return true;
+    return isOrganizerOf(req, data?.trip as string | undefined);
+  }) satisfies Access,
+  update: (async ({ req }) => {
+    if (isPlatformAdminReq(req)) return true;
+    if (!userId(req)) return false;
+    return { trip: { in: await organizerTripIds(req) } };
+  }) satisfies Access,
+  delete: (async ({ req }) => {
+    if (isPlatformAdminReq(req)) return true;
+    if (!userId(req)) return false;
+    return { trip: { in: await organizerTripIds(req) } };
+  }) satisfies Access,
+};
+
+/**
+ * Poll options: members read all; **any member may create** one (participants
+ * suggest options — flagged `suggestedBy`, §8.2), but only organizers may edit,
+ * hide, promote, or delete them (moderation).
+ */
+export const pollOptionsAccess = {
+  read: (async ({ req }) => {
+    if (isPlatformAdminReq(req)) return true;
+    if (!userId(req)) return false;
+    return { trip: { in: await memberTripIds(req) } };
+  }) satisfies Access,
+  create: (async ({ req, data }) => {
+    if (isPlatformAdminReq(req)) return true;
+    return isMemberOf(req, data?.trip as string | undefined);
+  }) satisfies Access,
+  update: (async ({ req }) => {
+    if (isPlatformAdminReq(req)) return true;
+    if (!userId(req)) return false;
+    return { trip: { in: await organizerTripIds(req) } };
+  }) satisfies Access,
+  delete: (async ({ req }) => {
+    if (isPlatformAdminReq(req)) return true;
+    if (!userId(req)) return false;
+    return { trip: { in: await organizerTripIds(req) } };
+  }) satisfies Access,
+};
+
+/**
+ * Votes are **public to read** across the trip (keeps the group honest, §8.2)
+ * but **personal to write**: a member may create/update/delete only their own
+ * votes; organizers may also clear votes. Self-scope is by the caller's own
+ * membership ids.
+ */
+export const votesAccess = {
+  read: (async ({ req }) => {
+    if (isPlatformAdminReq(req)) return true;
+    if (!userId(req)) return false;
+    return { trip: { in: await memberTripIds(req) } };
+  }) satisfies Access,
+  create: (async ({ req, data }) => {
+    if (isPlatformAdminReq(req)) return true;
+    return isMemberOf(req, data?.trip as string | undefined);
+  }) satisfies Access,
+  update: (async ({ req }) => {
+    if (isPlatformAdminReq(req)) return true;
+    if (!userId(req)) return false;
+    const where: Where = {
+      or: [
+        { trip: { in: await organizerTripIds(req) } },
+        { membership: { in: await myMembershipIds(req) } },
+      ],
+    };
+    return where;
+  }) satisfies Access,
+  delete: (async ({ req }) => {
+    if (isPlatformAdminReq(req)) return true;
+    if (!userId(req)) return false;
+    const where: Where = {
+      or: [
+        { trip: { in: await organizerTripIds(req) } },
+        { membership: { in: await myMembershipIds(req) } },
+      ],
+    };
+    return where;
   }) satisfies Access,
 };
 
