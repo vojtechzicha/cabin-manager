@@ -1,0 +1,117 @@
+@import "tailwindcss";
+
+/*
+  Chata design system — a warm, fixed neutral spine with a per-trip accent.
+  Theming is driven by four runtime variables only, set per trip on a wrapper:
+    --accent, --accent-ink, --accent-soft, --photo
+  Everything else (neutrals, type, radius) never changes.
+*/
+
+:root {
+  /* warm neutral spine */
+  --paper: #f4efe7;
+  --card: #fffdf9;
+  --line: #e8e1d4;
+  --sand: #b7aa97;
+  --muted: #756f64;
+  --ink: #1c1b18;
+
+  /* semantic */
+  --confirmed: #2f9e73;
+  --due: #e8a93b;
+  --overdue: #d8503f;
+  --info: #3f86d8;
+
+  /* per-trip accent — sensible default (cabin/sage) so un-themed routes still render */
+  --accent: #2f9e73;
+  --accent-ink: #15623f;
+  --accent-soft: #e3f3ec;
+  --gold: #ffd23f;
+  --photo: radial-gradient(125% 90% at 76% 0%, #8fd9b4 0%, #2f9e73 42%, #18694a 76%, #0e4732 100%);
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-card: var(--card);
+  --color-line: var(--line);
+  --color-sand: var(--sand);
+  --color-muted: var(--muted);
+  --color-ink: var(--ink);
+
+  --color-confirmed: var(--confirmed);
+  --color-due: var(--due);
+  --color-overdue: var(--overdue);
+  --color-info: var(--info);
+
+  /* accent utilities resolve to the runtime var, so bg-accent re-skins per trip */
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-soft: var(--accent-soft);
+  --color-gold: var(--gold);
+
+  --font-sans: var(--font-hanken), system-ui, sans-serif;
+  --font-display: var(--font-bricolage), Georgia, serif;
+  --font-mono: var(--font-space-mono), ui-monospace, monospace;
+
+  --radius-chip: 8px;
+  --radius-btn: 14px;
+  --radius-card: 20px;
+  --radius-sheet: 28px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: #1c1b18;
+  color: #fff;
+}
+
+@layer utilities {
+  /* the trip photo / gradient hero fill */
+  .bg-photo {
+    background: var(--photo);
+  }
+
+  /* adaptive glass — translucent neutral, floats over content */
+  .glass {
+    background: rgba(255, 253, 249, 0.82);
+    backdrop-filter: blur(18px) saturate(1.4);
+    -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  }
+  /* adaptive glass — tinted toward the trip accent, for use over the hero photo */
+  .glass-accent {
+    background: color-mix(in srgb, var(--accent) 26%, rgba(255, 255, 255, 0.14));
+    backdrop-filter: blur(16px) saturate(1.5);
+    -webkit-backdrop-filter: blur(16px) saturate(1.5);
+  }
+
+  .mono {
+    font-family: var(--font-mono);
+  }
+  .display {
+    font-family: var(--font-display);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      transition-duration: 0.001ms !important;
+    }
+  }
+}
